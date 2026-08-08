@@ -1,7 +1,8 @@
-# CLAUDE.md — Salesforce Formula Debugger
+# CLAUDE.md — Sigha
 
-A free, open-source, client-side Salesforce formula debugger: syntax/error highlighting,
-simulation with user-supplied field values, boolean simplification, formatting, and linting.
+Sigha (Arabic for "formula") is a free, open-source, client-side Salesforce formula debugger:
+syntax/error highlighting, simulation with user-supplied field values, boolean simplification,
+formatting, and linting.
 **No server. No backend. Ever.** Everything runs in the browser.
 
 Read `DESIGN.md` before writing code. It is the authoritative spec; this file is the set of
@@ -164,4 +165,4 @@ those nearly verbatim. Their PEG grammar is reference-only — we write our own 
 - When working on the UI, apply deliberate visual design per the frontend-design skill — this
   page is a brand touchpoint, not an internal tool. The product name, palette, and cross-links
   live in one theme module (`src/theme/`) so branding changes stay a one-file change. The tool
-  is hosted at `formulas.cirrus.tools`.
+  is hosted at `sigha.app`.

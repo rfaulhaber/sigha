@@ -14,14 +14,14 @@
  */
 
 export const product = {
-  name: "Formula Debugger",
+  name: "Sigha",
   /**
    * Cross-link to the Cirrus platform the tool belongs to. Dormant until the
    * platform site is live — set to "https://cirrus.tools" to show the link.
    */
   platformUrl: null as string | null,
   /** Public source repository, linked in the footer. */
-  repoUrl: "https://github.com/cirrus-code/sfdc-formula-debugger",
+  repoUrl: "https://github.com/rfaulhaber/sigha",
 } as const;
 
 export const palette = {

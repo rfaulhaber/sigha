@@ -5,7 +5,7 @@
  */
 export const copy = {
   /** Mirrored statically in index.html for pre-JS rendering and SEO. */
-  pageTitle: "Salesforce Formula Debugger",
+  pageTitle: (name: string) => `${name} — Salesforce Formula Debugger`,
   tagline:
     "Debug Salesforce formulas in your browser. Nothing leaves the page.",
   badge: "Client-side · No backend",

@@ -1,18 +1,18 @@
 {
-  "name": "sfdc-formula-analyzer",
+  "name": "sigha",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A free, client-side Salesforce formula debugger — syntax highlighting, simulation, simplification, formatting, and linting. No backend, ever.",
+  "description": "Sigha — a free, client-side Salesforce formula debugger: syntax highlighting, simulation, simplification, formatting, and linting. No backend, ever.",
   "license": "MIT",
   "author": "Ryan Faulhaber",
-  "homepage": "https://formulas.cirrus.tools",
+  "homepage": "https://sigha.app",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cirrus-code/sfdc-formula-debugger.git"
+    "url": "git+https://github.com/rfaulhaber/sigha.git"
   },
   "bugs": {
-    "url": "https://github.com/cirrus-code/sfdc-formula-debugger/issues"
+    "url": "https://github.com/rfaulhaber/sigha/issues"
   },
   "scripts": {
     "dev": "vite",

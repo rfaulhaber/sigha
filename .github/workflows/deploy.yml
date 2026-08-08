@@ -2,7 +2,7 @@ name: Deploy
 
 # Build the static site and publish it to GitHub Pages (Actions deployment
 # mode — repo Settings → Pages → Source must be "GitHub Actions"). The site
-# is served at https://formulas.cirrus.tools via the custom-domain setting.
+# is served at https://sigha.app via the custom-domain setting.
 
 on:
   push:

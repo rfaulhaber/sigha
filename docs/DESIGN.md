@@ -1,13 +1,13 @@
-# Salesforce Formula Debugger — Design Document
+# Sigha — Design Document
 
 ## 1. Overview
 
-A free, entirely client-side web tool for working with Salesforce formulas. Users paste or write
-a formula and get: instant syntax and semantic error highlighting, a simulation panel that
-detects field references and lets them supply values to compute a result, boolean logic
-simplification with step-by-step explanation, canonical reformatting, and lint findings. The
-tool is free and open source: it must load instantly, feel expert-grade, and never give a
-confidently wrong answer.
+Sigha (Arabic for "formula") is a free, entirely client-side web tool for working with
+Salesforce formulas. Users paste or write a formula and get: instant syntax and semantic error
+highlighting, a simulation panel that detects field references and lets them supply values to
+compute a result, boolean logic simplification with step-by-step explanation, canonical
+reformatting, and lint findings. The tool is free and open source: it must load instantly,
+feel expert-grade, and never give a confidently wrong answer.
 
 The emphasis is the full debugger experience, not evaluation alone — editor-grade positioned
 diagnostics with error recovery, comment-preserving formatting, linting, step-by-step
@@ -290,7 +290,7 @@ Single-page layout: context picker (with Tier 2 disclaimer where applicable) →
 desktop-first. Errors and empty states follow direction-not-mood copy. Visual design follows
 the "calibrated instrument" direction; product name, palette, and any cross-linking live in one
 theme module (`src/theme/`) so branding changes stay a one-file change. The tool is hosted at
-`formulas.cirrus.tools`.
+`sigha.app`.
 
 ## 10. Testing & conformance
 

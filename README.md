@@ -1,8 +1,10 @@
-# Formula Debugger
+# Sigha
 
 **Debug Salesforce formulas in your browser — nothing leaves the page.**
 
-**[formulas.cirrus.tools](https://formulas.cirrus.tools)**
+**[sigha.app](https://sigha.app)**
+
+_Sigha_ (صيغة) is Arabic for "formula."
 
 Paste or write a Salesforce formula and get instant, editor-grade feedback:
 

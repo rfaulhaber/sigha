@@ -29,6 +29,30 @@
       content="Sigha — debug Salesforce formulas in your browser. A formula shown with its simulated result."
     />
     <meta name="twitter:card" content="summary_large_image" />
+    <!--
+      Pre-paint mode stamp. The app bundle is a deferred module, so without
+      this the browser paints its canvas from the stylesheet's default
+      `color-scheme: dark` and a light-mode visitor sees a dark flash before
+      React ever runs. Sets the attribute only — no colors, so theme/theme.ts
+      stays the single source of those. The storage key mirrors STORAGE_KEY in
+      src/theme/mode.ts.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("sigha:theme");
+          var mode =
+            stored === "light" || stored === "dark"
+              ? stored
+              : matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          document.documentElement.dataset.theme = mode;
+        } catch (e) {
+          /* Storage or matchMedia unavailable: the stylesheet default stands. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

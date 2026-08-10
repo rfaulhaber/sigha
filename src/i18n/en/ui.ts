@@ -18,6 +18,16 @@ export const ui = {
     insertFunctionTitle:
       "Insert a function available in this context at the cursor",
   },
+  theme: {
+    system: "Auto",
+    light: "Light",
+    dark: "Dark",
+    /** Reads back the resolved mode, since "Auto" alone doesn't say which. */
+    following: (mode: string) => `Auto, following your system (${mode})`,
+    /** Tooltip and accessible name for the cycling mode switch. */
+    action: (current: string, next: string) =>
+      `Theme: ${current}. Click for ${next}.`,
+  },
   problems: {
     label: "Problems",
     none: "no problems",

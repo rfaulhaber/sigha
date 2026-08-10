@@ -3,12 +3,14 @@ import { createRoot } from "react-dom/client";
 import "./theme/fonts.ts";
 import { t } from "./i18n/index.ts";
 import { applyThemeVars, product } from "./theme/theme.ts";
+import { readPreference, resolveMode } from "./theme/mode.ts";
 import { App } from "./ui/App.tsx";
 import "./ui/global.css";
 
 // The stylesheet resolves every color through --sfa-* custom properties;
-// populate them from the theme module before anything renders.
-applyThemeVars();
+// populate them from the theme module before anything renders. <App/> owns
+// the mode from here on — this is only to beat the first paint.
+applyThemeVars(resolveMode(readPreference()));
 
 // index.html carries the static English title for pre-JS rendering; the
 // catalog re-asserts it here so a boot-time locale swap covers the tab title.

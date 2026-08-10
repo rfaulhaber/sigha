@@ -17,10 +17,12 @@ import {
   localizedContextNote,
   t,
 } from "../i18n/index.ts";
-import { applyThemeVars, palette, product } from "../theme/theme.ts";
+import { palette, product } from "../theme/theme.ts";
+import { nextPreference, type ThemePreference } from "../theme/mode.ts";
 import { FormulaEditor, type EditorHandle } from "./editor/FormulaEditor.tsx";
 import { InsertFunctionPicker } from "./InsertFunctionPicker.tsx";
 import { Panel } from "./Panel.tsx";
+import { useThemeMode, type ThemeControl } from "./useThemeMode.ts";
 import { offsetToLineCol } from "./util/position.ts";
 
 // The simulator is the only route to the evaluator (and its decimal.js
@@ -52,13 +54,10 @@ const SEVERITY_COLOR: Record<string, string> = {
 };
 
 export function App() {
-  // The stylesheet resolves colors through --sfa-* vars; populate them from
-  // the theme module before the first paint (idempotent, also covers tests
-  // that mount <App/> without going through main.tsx).
-  useState(() => {
-    applyThemeVars();
-    return null;
-  });
+  // Owns the --sfa-* custom properties every stylesheet and inline style
+  // resolves against, so this also covers tests that mount <App/> without
+  // going through main.tsx.
+  const themeControl = useThemeMode();
 
   // Restore shared state from the URL hash, synchronously, so the editor
   // mounts with the restored formula instead of flashing the sample.
@@ -168,6 +167,7 @@ export function App() {
           >
             {t().ui.toolbar.format}
           </button>
+          <ModeSwitch {...themeControl} />
         </div>
       </div>
 
@@ -175,6 +175,7 @@ export function App() {
         <FormulaEditor
           initialDoc={initialDoc}
           contextId={contextId}
+          themeMode={themeControl.mode}
           onChange={setSource}
           handleRef={editorRef}
         />
@@ -335,6 +336,42 @@ function ContextPicker({ contextId, onChange }: ContextPickerProps) {
         ))}
       </select>
     </label>
+  );
+}
+
+/** Filled / hollow / half — a dial position, matching the all-mono chrome. */
+const MODE_GLYPH: Record<ThemePreference, string> = {
+  system: "◐",
+  light: "○",
+  dark: "●",
+};
+
+/**
+ * Cycles system → light → dark. The state is a visible word rather than an
+ * icon alone: "Auto" has no glyph anyone reads reliably, and the button's
+ * text is also its accessible name.
+ */
+function ModeSwitch({ preference, mode, cycle }: ThemeControl) {
+  const strings = t().ui.theme;
+  const current =
+    preference === "system"
+      ? strings.following(strings[mode])
+      : strings[preference];
+  const description = strings.action(current, strings[nextPreference(preference)]);
+
+  return (
+    <button
+      type="button"
+      className="btn mode-switch"
+      onClick={cycle}
+      title={description}
+      aria-label={description}
+    >
+      <span aria-hidden className="mode-switch__glyph">
+        {MODE_GLYPH[preference]}
+      </span>
+      {strings[preference]}
+    </button>
   );
 }
 

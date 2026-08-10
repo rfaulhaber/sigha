@@ -1,5 +1,11 @@
-import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
-import { EditorState } from "@codemirror/state";
+import {
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
+import { Compartment, EditorState } from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -15,9 +21,10 @@ import { completionKeymap, snippet } from "@codemirror/autocomplete";
 import { format } from "../../features/formatter.ts";
 import { PASTE_CHAR_PATTERN } from "../../syntax/index.ts";
 import { t } from "../../i18n/index.ts";
+import type { ThemeMode } from "../../theme/theme.ts";
 import { sfHighlight } from "./highlight.ts";
 import { sfLinter } from "./lint.ts";
-import { sfEditorTheme } from "./editorTheme.ts";
+import { editorThemes } from "./editorTheme.ts";
 import { sfCompletion } from "./completion.ts";
 import { sfHover } from "./hover.ts";
 import { contextField, setContext } from "./contextField.ts";
@@ -36,6 +43,7 @@ export interface EditorHandle {
 interface FormulaEditorProps {
   readonly initialDoc: string;
   readonly contextId: string;
+  readonly themeMode: ThemeMode;
   readonly onChange: (doc: string) => void;
   readonly handleRef?: Ref<EditorHandle>;
 }
@@ -66,11 +74,18 @@ function formatView(view: EditorView): boolean {
 export function FormulaEditor({
   initialDoc,
   contextId,
+  themeMode,
   onChange,
   handleRef,
 }: FormulaEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // Colors follow the --sfa-* variables on their own; the compartment exists
+  // for CodeMirror's `dark` flag, which the base theme branches on and which
+  // therefore has to be swapped as configuration. See editorTheme.ts. It is
+  // an identity token the editor state holds, so it has to outlive renders
+  // without being recreated by them.
+  const [themeSlot] = useState(() => new Compartment());
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -143,7 +158,7 @@ export function FormulaEditor({
           sfHover,
           sfLinter,
           lintGutter(),
-          sfEditorTheme,
+          themeSlot.of(editorThemes[themeMode]),
           EditorView.lineWrapping,
           EditorView.updateListener.of((u) => {
             if (u.docChanged) {
@@ -168,6 +183,12 @@ export function FormulaEditor({
   useEffect(() => {
     viewRef.current?.dispatch({ effects: setContext.of(contextId) });
   }, [contextId]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: themeSlot.reconfigure(editorThemes[themeMode]),
+    });
+  }, [themeMode, themeSlot]);
 
   return <div ref={host} />;
 }

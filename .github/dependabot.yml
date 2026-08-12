@@ -3,6 +3,6 @@ updates:
   - package-ecosystem: "npm"
     directories:
       - "/"
-      - "orgcheck/"
+      - "/orgcheck"
     schedule:
       interval: "weekly"

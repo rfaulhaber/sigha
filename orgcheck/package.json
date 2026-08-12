@@ -14,8 +14,8 @@
     "sf": "sf"
   },
   "devDependencies": {
-    "@salesforce/cli": "^2.100.0",
-    "@types/node": "^26.1.1",
-    "typescript": "^5.9.3"
+    "@salesforce/cli": "^2.147.7",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
   }
 }

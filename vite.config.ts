@@ -12,14 +12,13 @@ export default defineConfig({
       output: {
         // Split rarely-changing vendor code into its own long-cache chunk,
         // separate from app code and the lazy-loaded simulator/decimal.js chunk.
-        manualChunks: {
-          react: ["react", "react-dom", "react/jsx-runtime"],
-          codemirror: [
-            "@codemirror/state",
-            "@codemirror/view",
-            "@codemirror/commands",
-            "@codemirror/lint",
-            "@codemirror/autocomplete",
+        // Rolldown's codeSplitting groups replace rollup's object-form
+        // manualChunks; dependencies of matched modules are included
+        // recursively by default.
+        codeSplitting: {
+          groups: [
+            { name: "react", test: /\/node_modules\/(?:react|react-dom)\// },
+            { name: "codemirror", test: /\/node_modules\/@codemirror\// },
           ],
         },
       },

@@ -6,3 +6,8 @@ updates:
       - "/orgcheck"
     schedule:
       interval: "weekly"
+    ignore:
+      # npm playwright must match the nixpkgs playwright-driver version that
+      # provides PLAYWRIGHT_BROWSERS_PATH (see flake.nix); bump it manually
+      # alongside a flake input update, not via dependabot.
+      - dependency-name: "playwright"

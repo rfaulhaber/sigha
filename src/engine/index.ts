@@ -8,7 +8,7 @@
  * May depend on: registry/, syntax/.
  */
 export * from "./value.ts";
-export { evaluateFormula, type EvalEnv } from "./evaluator.ts";
+export { evaluateFormula, materialize, type EvalEnv } from "./evaluator.ts";
 // Part of the engine's public contract: TEXT() and `^` render/compute
 // differently for syntactically-literal operands, so equivalence-preserving
 // rewrites (the simplifier) must be able to see the same distinction.

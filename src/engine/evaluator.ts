@@ -43,6 +43,14 @@ export interface EvalEnv {
   readonly blankMode: BlankMode;
   /** Clock for TODAY()/NOW(); required for those functions to simulate. */
   readonly now?: DatetimeVal;
+  /**
+   * Fires once per node actually evaluated, in evaluation order — the hook
+   * the Simulate panel's sub-expression trace is built on. A node skipped by
+   * short-circuiting (AND/OR/IF/CASE, `&&`/`||`) never fires; its absence
+   * from the trace *is* the "not evaluated" signal, so callers must not
+   * synthesize a placeholder for it.
+   */
+  readonly trace?: (node: Expr, result: EvalResult) => void;
 }
 
 /**
@@ -73,7 +81,13 @@ export function evaluateFormula(ast: Expr, env: EvalEnv): EvalResult {
 // FLOOR((1/9)*9) becomes 0 instead of 1. Oracle-verified.
 const MAX_SCALE = 32;
 
-function materialize(v: SfValue): SfValue {
+/**
+ * Round a Number/Currency/Percent to Salesforce's 32-place display scale.
+ * Exported so the Simulate panel can render traced intermediate values (which
+ * are otherwise kept raw, at full 39-sig-fig precision) at the same scale as
+ * the final result.
+ */
+export function materialize(v: SfValue): SfValue {
   if (v.blank || !isNumericType(v)) {
     return v;
   }
@@ -89,7 +103,19 @@ const ORG_STATE_GLOBAL_ROOTS = new Set(
     .map((g) => g.name.toLowerCase()),
 );
 
+/**
+ * Every recursive call in this module (evalBinary, evalCall, and the special
+ * forms in builtins.ts, which receive this exact function as their
+ * `evaluate` parameter) goes through this wrapper, so `env.trace` sees every
+ * node that is actually evaluated — and only those — in exactly one place.
+ */
 function evaluate(node: Expr, env: EvalEnv): EvalResult {
+  const result = evaluateNode(node, env);
+  env.trace?.(node, result);
+  return result;
+}
+
+function evaluateNode(node: Expr, env: EvalEnv): EvalResult {
   switch (node.kind) {
     case "NumberLit":
       return num(node.raw);
@@ -596,7 +622,8 @@ function blankBooleanEqual(
 ): boolean | null | undefined {
   const isBoolish = (v: SfValue) =>
     v.type === "Boolean" || (v.blank && v.type === "Unknown");
-  const realBool = (l.type === "Boolean" && !l.blank) || (r.type === "Boolean" && !r.blank);
+  const realBool =
+    (l.type === "Boolean" && !l.blank) || (r.type === "Boolean" && !r.blank);
   if (!realBool || !(l.blank || r.blank) || !isBoolish(l) || !isBoolish(r)) {
     return undefined;
   }

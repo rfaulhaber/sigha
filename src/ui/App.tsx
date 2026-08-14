@@ -323,11 +323,6 @@ export function App() {
         >
           <span>{t().copy.footer}</span>
           <span style={{ display: "flex", gap: "1.1rem" }}>
-            {product.platformUrl ? (
-              <a href={product.platformUrl}>
-                {t().ui.footer.platformLink(new URL(product.platformUrl).host)}
-              </a>
-            ) : null}
             <a href={product.repoUrl}>{t().ui.footer.sourceLink}</a>
           </span>
         </div>

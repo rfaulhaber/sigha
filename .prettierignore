@@ -3,6 +3,13 @@
 # drift job then reports as drift on formatting alone.
 corpus/salesforce-v2.json
 
+# Emitted by the orgcheck pipeline (orgcheck:emit), which formats its own
+# output — the same out-of-band-rewrite hazard as salesforce-v2.json.
+corpus/org-verified.json
+
+# pnpm owns the lockfile format; reformatting it just fights the next install.
+pnpm-lock.yaml
+
 # Salesforce's formula-engine, cloned on demand by oracle/ci-smoke.sh. Vendored
 # upstream source is not ours to reformat.
 oracle/formula-engine/

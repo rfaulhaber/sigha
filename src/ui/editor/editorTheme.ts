@@ -147,8 +147,10 @@ function makeEditorTheme(mode: ThemeMode) {
  * flag — the colors are the same variable references — so this duplicates a
  * StyleModule, not a palette.
  */
-export const editorThemes: Record<ThemeMode, ReturnType<typeof makeEditorTheme>> =
-  {
-    dark: makeEditorTheme("dark"),
-    light: makeEditorTheme("light"),
-  };
+export const editorThemes: Record<
+  ThemeMode,
+  ReturnType<typeof makeEditorTheme>
+> = {
+  dark: makeEditorTheme("dark"),
+  light: makeEditorTheme("light"),
+};

@@ -91,6 +91,31 @@
             pnpm run typecheck && pnpm run lint && pnpm run test
           '';
 
+          # Pre-commit hooks, installed into .git/hooks on shell entry.
+          # prettier/eslint run the repo-pinned binaries via pnpm exec, not
+          # nixpkgs' copies — tool versions outside package.json have already
+          # produced phantom failures here once. Heavier gates (typecheck,
+          # tests) stay in `devenv test` and CI, keeping commits fast.
+          git-hooks.hooks = {
+            prettier-pinned = {
+              enable = true;
+              name = "prettier (repo-pinned)";
+              # --ignore-unknown + .prettierignore do the file filtering.
+              entry = "pnpm exec prettier --write --ignore-unknown";
+            };
+            eslint-pinned = {
+              enable = true;
+              name = "eslint (repo-pinned)";
+              # --no-warn-ignored: files covered by eslint.config.js ignores
+              # arrive as explicit arguments here and must not warn (which
+              # --max-warnings 0 would turn into a failure).
+              entry = "pnpm exec eslint --max-warnings 0 --no-warn-ignored";
+              files = "\\.m?[jt]sx?$";
+            };
+            alejandra.enable = true;
+            check-merge-conflicts.enable = true;
+          };
+
           tasks = {
             "app:install" = app "pnpm install";
             "app:dev" = app "pnpm run dev";

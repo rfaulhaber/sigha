@@ -249,6 +249,57 @@ test("truncates a long snippet containing an astral character without corrupting
   expect(snippets.some((s) => s.includes("�"))).toBe(false);
 });
 
+test("test suite rows report live pass/fail and update when the formula changes", async () => {
+  const screen = await render(<App />);
+  await expect
+    .poll(() => screen.container.querySelector(".cm-content"))
+    .toBeTruthy();
+
+  await typeFormula(screen.container, "Amount__c > 100");
+  await expect
+    .poll(() => screen.container.textContent ?? "")
+    .toContain("Add test");
+
+  const addTest = screen.getByRole("button", { name: "Add test" });
+  await userEvent.click(addTest);
+  await userEvent.click(addTest);
+
+  const rows = (): HTMLTableRowElement[] =>
+    Array.from(
+      screen.container.querySelectorAll<HTMLTableRowElement>("table tbody tr"),
+    );
+  await expect.poll(() => rows().length).toBe(2);
+
+  // A fresh row's field cell starts blank (no cell recorded yet) — the
+  // "blank" checkbox has to come off before the value input appears.
+  const blankToggle = (i: number): HTMLInputElement =>
+    rows()[i]!.cells[0]!.querySelector('input[type="checkbox"]')!;
+  const fieldInput = (i: number): HTMLInputElement | null =>
+    rows()[i]!.cells[0]!.querySelector('input[type="text"]');
+  const expectedInput = (i: number): HTMLInputElement =>
+    rows()[i]!.cells[1]!.querySelector('input[type="text"]')!;
+  const led = (i: number): Element => rows()[i]!.querySelector(".led")!;
+
+  await userEvent.click(blankToggle(0));
+  await expect.poll(() => fieldInput(0)).toBeTruthy();
+  await userEvent.fill(fieldInput(0)!, "150");
+  await userEvent.fill(expectedInput(0), "true");
+
+  await userEvent.click(blankToggle(1));
+  await expect.poll(() => fieldInput(1)).toBeTruthy();
+  await userEvent.fill(fieldInput(1)!, "50");
+  await userEvent.fill(expectedInput(1), "true");
+
+  // 150 > 100 matches the "true" expectation; 50 > 100 doesn't.
+  await expect.poll(() => led(0).className).toContain("led--ok");
+  await expect.poll(() => led(1).className).toContain("led--err");
+
+  // Lower the threshold: row 2's 50 now clears it too, flipping its LED live.
+  await typeFormula(screen.container, "Amount__c > 10");
+  await expect.poll(() => led(1).className).toContain("led--ok");
+  expect(led(0).className).toContain("led--ok");
+});
+
 test("surfaces lint findings in the Problems panel", async () => {
   const screen = await render(<App />);
   await expect

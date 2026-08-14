@@ -12,6 +12,7 @@ import {
   decodePermalink,
   encodePermalink,
   type PermalinkField,
+  type PermalinkTests,
 } from "../features/permalink.ts";
 import type { BlankMode } from "../engine/value.ts";
 import { CONTEXTS, DEFAULT_CONTEXT_ID, getContext } from "../registry/index.ts";
@@ -25,6 +26,7 @@ import { nextPreference, type ThemePreference } from "../theme/mode.ts";
 import { FormulaEditor, type EditorHandle } from "./editor/FormulaEditor.tsx";
 import { InsertFunctionPicker } from "./InsertFunctionPicker.tsx";
 import { Panel } from "./Panel.tsx";
+import { newRowId, type TestSuiteState } from "./testsuite/state.ts";
 import { useThemeMode, type ThemeControl } from "./useThemeMode.ts";
 import { offsetToLineCol } from "./util/position.ts";
 
@@ -43,6 +45,15 @@ const SimplifyPanel = lazy(async () => {
   return { default: m.SimplifyPanel };
 });
 
+// Same evaluator dependency as the simulator, same treatment: code-split out
+// of the first paint. TestSuiteState itself lives in testsuite/state.ts,
+// which stays free of the evaluator so this file can seed and update it
+// synchronously without eagerly loading this chunk.
+const TestSuitePanel = lazy(async () => {
+  const m = await import("./testsuite/TestSuitePanel.tsx");
+  return { default: m.TestSuitePanel };
+});
+
 const SAMPLE = `/* Weighted deal value — a blank discount means list price */
 IF(
   ISBLANK(Discount__c),
@@ -55,6 +66,19 @@ const SEVERITY_COLOR: Record<string, string> = {
   warning: palette.warning,
   info: palette.accent,
 };
+
+/** Seed the test suite from a decoded permalink, assigning each row a fresh
+ * id rather than trusting one carried in the URL. */
+function seedTests(tests: PermalinkTests | undefined): TestSuiteState {
+  if (!tests) {
+    return { rows: [], types: {}, blankMode: "zero" };
+  }
+  return {
+    rows: tests.rows.map((row) => ({ ...row, id: newRowId() })),
+    types: tests.types,
+    blankMode: tests.blankMode,
+  };
+}
 
 export function App() {
   // Owns the --sfa-* custom properties every stylesheet and inline style
@@ -73,6 +97,9 @@ export function App() {
       ? restored.context
       : DEFAULT_CONTEXT_ID,
   );
+  const [tests, setTests] = useState<TestSuiteState>(() =>
+    seedTests(restored?.tests),
+  );
   const editorRef = useRef<EditorHandle>(null);
 
   // The only place formula text leaves the editor: explicit user action,
@@ -86,6 +113,20 @@ export function App() {
       formula: source,
       fields,
       blankMode,
+      // An empty suite is the default state, not something worth restoring;
+      // only travel it once the user has actually written a test case.
+      ...(tests.rows.length > 0
+        ? {
+            tests: {
+              rows: tests.rows.map((row) => ({
+                values: row.values,
+                expected: row.expected,
+              })),
+              types: tests.types,
+              blankMode: tests.blankMode,
+            },
+          }
+        : {}),
     });
     const url = `${window.location.origin}${window.location.pathname}#${hash}`;
     window.history.replaceState(null, "", `#${hash}`);
@@ -195,6 +236,13 @@ export function App() {
                   : undefined
               }
               onShare={share}
+            />
+            <TestSuitePanel
+              ast={ast}
+              syntaxErrors={syntaxErrors}
+              blankToggle={context?.blankModeToggle ?? false}
+              state={tests}
+              onChange={setTests}
             />
             <SimplifyPanel
               source={source}

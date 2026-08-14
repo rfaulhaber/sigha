@@ -262,6 +262,35 @@ function TestCellInput({
   cell: TestCell;
   onChange: (patch: Partial<TestCell>) => void;
 }) {
+  // Boolean folds blankness into one three-state select: a value checkbox
+  // next to the blank checkbox reads as two identical boxes with opposite
+  // meanings, and a blank Boolean is genuinely a third value state (the
+  // evaluator's three-valued blankBooleanEqual), not a missing one.
+  if (type === "Boolean") {
+    let state = "false";
+    if (cell.blank) {
+      state = "null";
+    } else if (cell.value === "true") {
+      state = "true";
+    }
+    return (
+      <select
+        className="select"
+        value={state}
+        onChange={(e) =>
+          onChange(
+            e.target.value === "null"
+              ? { blank: true }
+              : { blank: false, value: e.target.value },
+          )
+        }
+      >
+        <option value="true">TRUE</option>
+        <option value="false">FALSE</option>
+        <option value="null">{t().ui.testSuite.nullField}</option>
+      </select>
+    );
+  }
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
       <TestCellValue type={type} cell={cell} onChange={onChange} />
@@ -300,17 +329,6 @@ function TestCellValue({
       <span style={{ color: palette.textMuted, fontSize: "0.78rem" }}>
         {t().ui.testSuite.nullField}
       </span>
-    );
-  }
-  if (type === "Boolean") {
-    return (
-      <input
-        type="checkbox"
-        checked={cell.value === "true"}
-        onChange={(e) =>
-          onChange({ value: e.target.checked ? "true" : "false" })
-        }
-      />
     );
   }
   return (

@@ -77,6 +77,7 @@ export const ui = {
     nullField: "null",
     blankCheckbox: "blank",
     badExpected: "Expected value doesn't parse as this result's type",
+    incomplete: "Enter an expected value",
     cannotSimulate: (functionName: string) =>
       `Cannot simulate: ${functionName} depends on org state`,
     invalidFormula: "Fix the syntax errors to run tests",

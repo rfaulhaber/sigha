@@ -388,6 +388,16 @@ function ResultCell({ outcome }: { outcome: Outcome }) {
           text={outcome.actualText}
         />
       );
+    case "incomplete":
+      return (
+        <Readout
+          led="led--warn"
+          color={palette.textMuted}
+          text={outcome.actualText}
+        >
+          <span className="chip">{t().ui.testSuite.incomplete}</span>
+        </Readout>
+      );
     case "badExpected":
       return (
         <Readout

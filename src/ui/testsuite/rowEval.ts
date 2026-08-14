@@ -4,6 +4,8 @@ import {
   asBool,
   asDecimal,
   asText,
+  blank,
+  bool,
   evaluateFormula,
   isError,
   UnsupportedError,
@@ -28,9 +30,14 @@ import type { TestRow } from "./state.ts";
 export type TestRowOutcome =
   | { readonly kind: "pass"; readonly actualText: string }
   | { readonly kind: "fail"; readonly actualText: string }
+  /** Mode "value" with no expected text yet. Distinct from fail: an empty
+   * string parses to a real 0/false/"" (buildFieldValue's own convention for
+   * a blank-unchecked cell), so a row the user hasn't written an assertion
+   * for yet must not silently compare against that fabricated value. */
+  | { readonly kind: "incomplete"; readonly actualText: string }
   /** The row's expected text doesn't parse as the actual result's type —
    * distinct from a real mismatch, since comparing against it would be
-   * comparing against buildFieldValue's blank fallback, not what the user
+   * comparing against the parser's blank fallback, not what the user
    * meant. */
   | { readonly kind: "badExpected"; readonly actualText: string }
   | { readonly kind: "unsupported"; readonly functionName: string };
@@ -72,6 +79,13 @@ export function evaluateTestRow(
 
   const actualText = renderResult(result);
 
+  // No assertion has been written yet — this takes priority over every other
+  // classification (including a genuine error or blank result) so a fresh
+  // row never reads as a pass or fail the user never asked for.
+  if (row.expected.mode === "value" && row.expected.value.trim() === "") {
+    return { kind: "incomplete", actualText };
+  }
+
   if (isError(result)) {
     return {
       kind: row.expected.mode === "error" ? "pass" : "fail",
@@ -89,8 +103,8 @@ export function evaluateTestRow(
     case "blank":
       return { kind: "fail", actualText };
     case "value": {
-      const expected = buildFieldValue(result.type, row.expected.value, false);
-      if (row.expected.value.trim() !== "" && expected.blank) {
+      const expected = parseExpected(result.type, row.expected.value);
+      if (expected.blank) {
         return { kind: "badExpected", actualText };
       }
       return {
@@ -104,12 +118,44 @@ export function evaluateTestRow(
 }
 
 /**
+ * Parse the row's expected text as a value of the actual result's type.
+ * Boolean and Percent can't reuse buildFieldValue's own raw-text convention
+ * as-is: the simulator's Boolean cells are a checkbox and never round-trip
+ * through free text, so buildFieldValue's `raw === "true"` is unfailable and
+ * case-sensitive here; and buildFieldValue's Percent parsing divides by 100
+ * (a form-input convention — "99" means 99%), but renderResult shows the
+ * stored fraction, so pasting a displayed Percent result back into Expected
+ * must parse as that same fraction, not re-divide it.
+ */
+function parseExpected(type: SfType, raw: string): SfValue {
+  switch (type) {
+    case "Boolean": {
+      const normalized = raw.trim().toLowerCase();
+      if (normalized === "true") {
+        return bool(true);
+      }
+      if (normalized === "false") {
+        return bool(false);
+      }
+      return blank("Boolean");
+    }
+    case "Percent":
+      return buildFieldValue("Number", raw, false);
+    default:
+      return buildFieldValue(type, raw, false);
+  }
+}
+
+/**
  * Value equality for a test assertion — never a rendered-string comparison
  * (a text result of "1.50" and an expected "1.5" must differ; a numeric
  * result of 1.50 and an expected "1.5" must not). `expected` is always built
  * from `actual`'s own type, so the two variants line up by construction.
+ * Exported for direct coverage of the Unknown arm, which the evaluator never
+ * reaches with a non-blank value today (see engine/value.ts's `blank()`) but
+ * which must still refuse rather than default to a silent pass.
  */
-function typedEquals(actual: SfValue, expected: SfValue): boolean {
+export function typedEquals(actual: SfValue, expected: SfValue): boolean {
   switch (actual.type) {
     case "Number":
     case "Currency":
@@ -140,7 +186,10 @@ function typedEquals(actual: SfValue, expected: SfValue): boolean {
         actual.data.millisOfDay === expected.data.millisOfDay
       );
     case "Unknown":
-      return true;
+      // Unreachable via evaluateTestRow (a non-blank Unknown never occurs),
+      // but a silent universal pass would be the wrong default if that ever
+      // changed — an unclassifiable value can't honestly match anything.
+      return false;
     default:
       return assertNever(actual);
   }

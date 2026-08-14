@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "../../syntax/index.ts";
-import type { DatetimeVal } from "../../engine/index.ts";
-import { evaluateTestRow } from "./rowEval.ts";
+import type { DatetimeVal, SfValue } from "../../engine/index.ts";
+import { evaluateTestRow, typedEquals } from "./rowEval.ts";
 import type { TestRow } from "./state.ts";
 
 const NOW: DatetimeVal = { epochMillis: Date.UTC(2026, 6, 21) };
@@ -137,21 +137,6 @@ describe("evaluateTestRow: pass/fail classification", () => {
     expect(outcome).toEqual({ kind: "badExpected", actualText: "42" });
   });
 
-  it("does not raise badExpected for an empty expected value in value mode", () => {
-    // Empty text parses as 0 for a Number field (buildFieldValue's own
-    // convention), not as blank — so the guard, which only fires on
-    // malformed *non-empty* text, must not fire here.
-    const outcome = outcomeFor(
-      "Amount",
-      row(
-        { Amount: { value: "0", blank: false } },
-        { mode: "value", value: "" },
-      ),
-      { Amount: "Number" },
-    );
-    expect(outcome).toEqual({ kind: "pass", actualText: "0" });
-  });
-
   it("changes outcome with the blank-handling mode, same row and formula", () => {
     const source = "NumberField__c + 1";
     const blankCell = row(
@@ -178,5 +163,104 @@ describe("evaluateTestRow: pass/fail classification", () => {
     // isn't subject to it, so this isolates the missing-cell fallback.)
     const outcome = outcomeFor("Name", row({}, { mode: "blank", value: "" }));
     expect(outcome.kind).toBe("pass");
+  });
+});
+
+describe("evaluateTestRow: incomplete rows", () => {
+  it("reports incomplete for a fresh row (mode value, no text) instead of fabricating a pass or fail", () => {
+    // Empty text would otherwise parse as a real 0 for a Number field
+    // (buildFieldValue's own convention for a non-blank empty cell), which
+    // is exactly the fabricated assertion this outcome exists to prevent.
+    const outcome = outcomeFor(
+      "Amount",
+      row(
+        { Amount: { value: "0", blank: false } },
+        { mode: "value", value: "" },
+      ),
+      { Amount: "Number" },
+    );
+    expect(outcome).toEqual({ kind: "incomplete", actualText: "0" });
+  });
+
+  it("treats whitespace-only expected text the same as empty", () => {
+    const outcome = outcomeFor(
+      "Amount",
+      row(
+        { Amount: { value: "5", blank: false } },
+        { mode: "value", value: "   " },
+      ),
+      { Amount: "Number" },
+    );
+    expect(outcome.kind).toBe("incomplete");
+  });
+
+  it("stays incomplete even when the actual result is blank or a genuine error", () => {
+    const blankResult = outcomeFor(
+      "Name",
+      row({ Name: { value: "", blank: true } }, { mode: "value", value: "" }),
+    );
+    expect(blankResult.kind).toBe("incomplete");
+
+    const errorResult = outcomeFor(
+      "1 / 0",
+      row({}, { mode: "value", value: "" }),
+    );
+    expect(errorResult.kind).toBe("incomplete");
+  });
+});
+
+describe("evaluateTestRow: Boolean expected text", () => {
+  const boolRow = (expectedValue: string): TestRow =>
+    row(
+      { Amount: { value: "150", blank: false } },
+      { mode: "value", value: expectedValue },
+    );
+
+  it("accepts TRUE/FALSE case-insensitively and trims whitespace, unlike the simulator's raw-checkbox convention", () => {
+    // 150 > 100 is TRUE.
+    expect(
+      outcomeFor("Amount > 100", boolRow("TRUE"), { Amount: "Number" }).kind,
+    ).toBe("pass");
+    expect(
+      outcomeFor("Amount > 100", boolRow("true "), { Amount: "Number" }).kind,
+    ).toBe("pass");
+    expect(
+      outcomeFor("Amount > 100", boolRow("False"), { Amount: "Number" }).kind,
+    ).toBe("fail");
+  });
+
+  it("reports badExpected for unparseable Boolean text rather than guessing", () => {
+    const outcome = outcomeFor("Amount > 100", boolRow("maybe"), {
+      Amount: "Number",
+    });
+    expect(outcome.kind).toBe("badExpected");
+  });
+});
+
+describe("evaluateTestRow: Percent expected text", () => {
+  it("parses the expected text as a plain Number (no /100), matching the fraction renderResult shows", () => {
+    // A Percent field's raw entry is a form-input convention (99 means 99%,
+    // stored as 0.99); renderResult shows that stored fraction back, so
+    // copying "0.99" straight from the Result column must round-trip.
+    const outcome = outcomeFor(
+      "Percent__c",
+      row(
+        { Percent__c: { value: "99", blank: false } },
+        { mode: "value", value: "0.99" },
+      ),
+      { Percent__c: "Percent" },
+    );
+    expect(outcome).toEqual({ kind: "pass", actualText: "0.99" });
+  });
+});
+
+describe("typedEquals: Unknown arm", () => {
+  it("never silently passes for a non-blank Unknown value", () => {
+    // The evaluator only ever produces a blank Unknown (engine/value.ts's
+    // blank()), so this is unreachable through evaluateTestRow today — but
+    // an unclassifiable value defaulting to "matches everything" would be a
+    // silent false pass if that ever changed.
+    const unknown: SfValue = { type: "Unknown", blank: false, data: null };
+    expect(typedEquals(unknown, unknown)).toBe(false);
   });
 });

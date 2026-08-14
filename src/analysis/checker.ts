@@ -3,6 +3,7 @@ import {
   type BinaryOp,
   type Diagnostic,
   type DiagnosticCode,
+  type DiagnosticFix,
   type Expr,
   type FunctionCall,
   type Severity,
@@ -16,6 +17,11 @@ import {
   type FunctionSpec,
   type SfType,
 } from "../registry/index.ts";
+import {
+  isNonstandardOperator,
+  nonstandardOperatorFix,
+  standardForm,
+} from "./operator-fix.ts";
 import { isAssignable, isComparable, isDatelike, isNumeric } from "./types.ts";
 
 /**
@@ -28,9 +34,16 @@ import { isAssignable, isComparable, isDatelike, isNumeric } from "./types.ts";
  * are warnings: inference is heuristic — field types are Unknown until the user
  * supplies them — so a mismatch is a strong hint, not a proven fault. Values
  * involving Unknown never fire (Unknown unifies with everything).
+ *
+ * The source text comes along for the quick-fixes, which rewrite original text
+ * rather than reprinting the AST (reprinting would drop comments).
  */
-export function analyze(root: Expr, contextId: string): readonly Diagnostic[] {
-  const checker = new Checker(contextId);
+export function analyze(
+  root: Expr,
+  source: string,
+  contextId: string,
+): readonly Diagnostic[] {
+  const checker = new Checker(source, contextId);
   const rootType = checker.check(root);
 
   const context = getContext(contextId);
@@ -56,8 +69,13 @@ export function analyze(root: Expr, contextId: string): readonly Diagnostic[] {
 class Checker {
   readonly diagnostics: Diagnostic[] = [];
   private readonly tier2: boolean;
+  /** Nonstandard operators currently on the path from the root (see checkBinary). */
+  private nonstandardDepth = 0;
 
-  constructor(private readonly contextId: string) {
+  constructor(
+    private readonly source: string,
+    private readonly contextId: string,
+  ) {
     this.tier2 = getContext(contextId)?.tier === 2;
   }
 
@@ -66,8 +84,9 @@ class Checker {
     severity: Severity,
     span: Span,
     message: string,
+    fix?: DiagnosticFix,
   ): void {
-    this.diagnostics.push({ code, severity, span, message });
+    this.diagnostics.push({ code, severity, span, message, fix });
   }
 
   /** Infer a node's type while collecting diagnostics along the way. */
@@ -111,8 +130,19 @@ class Checker {
   }
 
   private checkBinary(node: BinaryOp): SfType {
+    // Only the topmost nonstandard operator of a nest gets a fix: its rewrite
+    // covers the whole subtree, so the nested findings would be fixing text
+    // that no longer exists once it is applied.
+    const nonstandard = isNonstandardOperator(node);
+    const topmost = nonstandard && this.nonstandardDepth === 0;
+    if (nonstandard) {
+      this.nonstandardDepth++;
+    }
     const left = this.check(node.left);
     const right = this.check(node.right);
+    if (nonstandard) {
+      this.nonstandardDepth--;
+    }
 
     switch (node.op) {
       case "*":
@@ -144,33 +174,28 @@ class Checker {
         return "Boolean";
       case "==":
       case "!=":
-        this.report(
-          "nonstandard-operator",
-          "warning",
-          node.opSpan,
-          t().checker.nonstandardOperator(
-            node.op,
-            node.op === "==" ? "=" : "<>",
-          ),
-        );
+        this.reportNonstandard(node, topmost);
         return "Boolean";
       case "&&":
       case "||":
-        this.report(
-          "nonstandard-operator",
-          "warning",
-          node.opSpan,
-          t().checker.nonstandardOperator(
-            node.op,
-            node.op === "&&" ? "AND()" : "OR()",
-          ),
-        );
+        this.reportNonstandard(node, topmost);
         this.expectBoolean(left, node.left.span, node.op);
         this.expectBoolean(right, node.right.span, node.op);
         return "Boolean";
       default:
         return assertNever(node.op);
     }
+  }
+
+  private reportNonstandard(node: BinaryOp, topmost: boolean): void {
+    const fix = topmost ? nonstandardOperatorFix(node, this.source) : null;
+    this.report(
+      "nonstandard-operator",
+      "warning",
+      node.opSpan,
+      t().checker.nonstandardOperator(node.op, standardForm(node.op)),
+      fix ?? undefined,
+    );
   }
 
   /** `+`/`-` are numeric, plus Salesforce date arithmetic (Date ± Number, Date − Date). */

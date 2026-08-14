@@ -3,7 +3,7 @@ import { parse } from "../syntax/index.ts";
 import { analyze } from "./checker.ts";
 
 function codes(source: string, contextId = "formula_field"): string[] {
-  return analyze(parse(source).ast, contextId).map((d) => d.code);
+  return analyze(parse(source).ast, source, contextId).map((d) => d.code);
 }
 
 describe("checker: function validation", () => {

@@ -87,8 +87,14 @@ Diagnostics may carry an optional machine-applicable fix: a title plus a list of
 text edits against the original source. The invisible/nonstandard-whitespace diagnostics fix by
 deleting or replacing with a regular space, the confusable-character diagnostics fix by
 substituting the ASCII equivalent, and the smart-quote diagnostic's fix straightens both quotes
-at once. The editor surfaces these as quick-fix actions; nothing about the fix mechanism is
-specific to this character class.
+at once. Every fix is offered in the Problems panel, individually and as a fix-all that applies
+them in a single edit — the invariant that fixes of distinct diagnostics never overlap is what
+makes the batch safe, and the diagnostic pipeline enforces it across producers by dropping the
+larger of two fixes that would collide. A fix that changes what the formula evaluates to rather
+than only how it is written (removing an invisible character from inside a string literal) is
+flagged as such and excluded from the fix-all, never from its own button. Nothing about the fix
+mechanism is specific to this character class — the analysis layer's `nonstandard-operator`
+findings use it too.
 
 Reserved-word handling: there are no reserved identifier prefixes. `Null_Check__c`,
 `TRUEFIELD__c`, etc. must lex and parse as identifiers. Keywords (`TRUE`, `FALSE`, `NULL`) are
@@ -104,7 +110,10 @@ couldn't settle product behavior (see CONFORMANCE.md). Tightest to loosest: pare
 left-associative — both invert the usual math conventions. `&&`, `||`, `==`, and `!=` are
 documented, org-verified product operators (`==`/`!=` are interchangeable with `=`/`<>`); we
 parse and evaluate them and flag each use with a stylistic `nonstandard-operator` warning
-steering toward the conventional `AND()`/`OR()`/`=`/`<>` forms.
+steering toward the conventional `AND()`/`OR()`/`=`/`<>` forms. The outermost operator of a nest
+carries a fix that rewrites the whole subtree into those forms, splicing original source text
+rather than reprinting the AST (which would drop comments) — and withholding the fix outright
+when the rewrite cannot be made without swallowing one.
 
 **Error recovery is the defining requirement.** Strategy:
 
@@ -285,12 +294,13 @@ the "Copy link" affordance should be prominent next to results.
 
 Single-page layout: context picker (with Tier 2 disclaimer where applicable) → CodeMirror editor
 (highlighting, inline squiggles, hover docs, autocomplete) → tabbed or stacked panels:
-**Simulate** (field form + result + blank-mode toggle), **Problems** (diagnostics + lint),
-**Simplify** (step log + apply button), **Format** (one-click, in-editor). Mobile-usable but
-desktop-first. Errors and empty states follow direction-not-mood copy. Visual design follows
-the "calibrated instrument" direction; product name, palette, and any cross-linking live in one
-theme module (`src/theme/`) so branding changes stay a one-file change. The tool is hosted at
-`sigha.app`.
+**Simulate** (field form + result + blank-mode toggle), **Problems** (diagnostics + lint, each
+fixable finding with its own Fix button and a fix-all in the panel header — the only place
+automatic fixes are applied from), **Simplify** (step log + apply button), **Format** (one-click,
+in-editor). Mobile-usable but desktop-first. Errors and empty states follow direction-not-mood
+copy. Visual design follows the "calibrated instrument" direction; product name, palette, and any
+cross-linking live in one theme module (`src/theme/`) so branding changes stay a one-file change.
+The tool is hosted at `sigha.app`.
 
 ## 10. Testing & conformance
 

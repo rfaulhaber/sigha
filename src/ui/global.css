@@ -54,7 +54,11 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  --grid: color-mix(in srgb, var(--sfa-border) var(--sfa-fx-gridMix), transparent);
+  --grid: color-mix(
+    in srgb,
+    var(--sfa-border) var(--sfa-fx-gridMix),
+    transparent
+  );
   background:
     radial-gradient(
       900px 480px at 24% -10%,
@@ -379,6 +383,30 @@ a:hover {
 
 .row-hover:hover {
   background: color-mix(in srgb, var(--sfa-text) 3.5%, transparent);
+}
+
+/* ---- Steps: sub-expression trace ------------------------------------------ */
+
+.steps {
+  border-top: 1px solid var(--sfa-border);
+}
+
+.steps__summary {
+  cursor: pointer;
+  padding: 0.55rem 1rem;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--sfa-textMuted);
+  transition: color 0.15s;
+}
+
+.steps__summary:hover {
+  color: var(--sfa-accent);
+}
+
+.steps__summary::marker {
+  color: var(--sfa-accent);
 }
 
 /* ---- Page-load choreography ---------------------------------------------- */

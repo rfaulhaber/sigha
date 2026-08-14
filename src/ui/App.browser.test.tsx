@@ -139,6 +139,58 @@ test("simulates the formula live from field inputs", async () => {
   await expect.element(screen.getByText("150")).toBeInTheDocument();
 });
 
+test("shows a sub-expression trace with the skipped branch marked not evaluated", async () => {
+  const screen = await render(<App />);
+  await expect
+    .poll(() => screen.container.querySelector(".cm-content"))
+    .toBeTruthy();
+
+  await typeFormula(screen.container, "IF(AND(foo, bar), baz + 13, quux + 14)");
+
+  // Fields extracted in source order: foo, bar infer Boolean (AND's
+  // arguments); baz, quux infer Number (arithmetic operands).
+  await expect
+    .poll(
+      () =>
+        screen.container.querySelectorAll('input[placeholder="value"]').length,
+    )
+    .toBe(2);
+  const [bazInput, quuxInput] = Array.from(
+    screen.container.querySelectorAll<HTMLInputElement>(
+      'input[placeholder="value"]',
+    ),
+  );
+  await userEvent.fill(bazInput!, "5");
+  await userEvent.fill(quuxInput!, "100");
+
+  // foo/bar default to FALSE, so AND(foo, bar) short-circuits to FALSE and IF
+  // takes the else branch: quux + 14 = 114.
+  await expect
+    .poll(() => screen.container.querySelector(".readout")?.textContent)
+    .toBe("114");
+
+  const summary = screen.container.querySelector(".steps__summary");
+  expect(summary).toBeTruthy();
+  await userEvent.click(summary!);
+  await expect
+    .poll(() =>
+      screen.container.querySelector("details.steps")?.hasAttribute("open"),
+    )
+    .toBe(true);
+
+  const rowValue = (snippet: string): string | null | undefined =>
+    Array.from(screen.container.querySelectorAll(".steps code"))
+      .find((code) => code.textContent === snippet)
+      ?.parentElement?.querySelector("span")?.textContent;
+
+  // The taken branch is traced with its computed value...
+  expect(rowValue("quux + 14")).toBe("114");
+  // ...and the branch IF skipped over — never evaluated — is marked as such,
+  // for both the sub-expression and the field reference inside it.
+  expect(rowValue("baz + 13")).toBe("not evaluated");
+  expect(rowValue("baz")).toBe("not evaluated");
+});
+
 test("surfaces lint findings in the Problems panel", async () => {
   const screen = await render(<App />);
   await expect

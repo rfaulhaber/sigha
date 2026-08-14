@@ -27,4 +27,7 @@ export {
   encodePermalink,
   type PermalinkField,
   type PermalinkState,
+  type PermalinkTestCell,
+  type PermalinkTestRow,
+  type PermalinkTests,
 } from "./permalink.ts";

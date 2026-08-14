@@ -69,3 +69,100 @@ describe("permalink codec", () => {
     expect(Object.keys(decoded!.fields)).toEqual(["A"]);
   });
 });
+
+describe("permalink codec: test suite", () => {
+  const STATE_WITH_TESTS: PermalinkState = {
+    ...STATE,
+    tests: {
+      rows: [
+        {
+          values: { Amount: { value: "100", blank: false } },
+          expected: { mode: "value", value: "110.00" },
+        },
+        {
+          values: {},
+          expected: { mode: "blank", value: "" },
+        },
+      ],
+      types: { Amount: "Currency" },
+      blankMode: "blank",
+    },
+  };
+
+  it("round-trips a test suite alongside the rest of the state", () => {
+    const encoded = encodePermalink(STATE_WITH_TESTS);
+    expect(decodePermalink(encoded)).toEqual(STATE_WITH_TESTS);
+  });
+
+  it("decodes a hash with no tests key at all (older links, or none added yet)", () => {
+    const decoded = decodePermalink(encodePermalink(STATE));
+    expect(decoded).not.toBeNull();
+    expect(decoded!.tests).toBeUndefined();
+  });
+
+  it("drops a garbage-shaped tests field without rejecting the rest of the link", () => {
+    const enc = (payload: unknown): string =>
+      compressToEncodedURIComponent(JSON.stringify(payload));
+
+    // Not an object at all.
+    const notAnObject = decodePermalink(
+      enc({ v: 1, context: "formula_field", formula: "1", tests: "nonsense" }),
+    );
+    expect(notAnObject).not.toBeNull();
+    expect(notAnObject!.tests).toBeUndefined();
+
+    // An object, but rows isn't an array.
+    const rowsNotArray = decodePermalink(
+      enc({
+        v: 1,
+        context: "formula_field",
+        formula: "1",
+        tests: { rows: "nope", types: {}, blankMode: "zero" },
+      }),
+    );
+    expect(rowsNotArray).not.toBeNull();
+    expect(rowsNotArray!.tests).toBeUndefined();
+  });
+
+  it("drops individual malformed rows and type entries, keeping the rest", () => {
+    const enc = (payload: unknown): string =>
+      compressToEncodedURIComponent(JSON.stringify(payload));
+
+    const decoded = decodePermalink(
+      enc({
+        v: 1,
+        context: "formula_field",
+        formula: "Amount",
+        tests: {
+          rows: [
+            {
+              values: { Amount: { value: "1", blank: false } },
+              expected: { mode: "value", value: "1" },
+            },
+            { values: {}, expected: { mode: "bogus", value: "1" } }, // bad mode
+            "nonsense", // not even an object
+            {
+              values: { A: "nonsense" },
+              expected: { mode: "blank", value: "" },
+            },
+          ],
+          types: { Amount: "Number", Bad: 5 },
+          blankMode: "not-a-mode",
+        },
+      }),
+    );
+
+    expect(decoded).not.toBeNull();
+    expect(decoded!.tests).toEqual({
+      rows: [
+        {
+          values: { Amount: { value: "1", blank: false } },
+          expected: { mode: "value", value: "1" },
+        },
+        { values: {}, expected: { mode: "blank", value: "" } },
+      ],
+      types: { Amount: "Number" },
+      blankMode: "zero",
+    });
+  });
+});

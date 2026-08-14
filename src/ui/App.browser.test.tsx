@@ -1,8 +1,6 @@
 import { expect, test, beforeEach, afterEach, vi } from "vitest";
 import { userEvent } from "vitest/browser";
-import { render } from "vitest-browser-react";
-import { EditorView } from "@codemirror/view";
-import { openLintPanel } from "@codemirror/lint";
+import { cleanup, render } from "vitest-browser-react";
 import { App } from "./App.tsx";
 
 /**
@@ -256,8 +254,12 @@ test("copies a permalink and restores formula, inputs, and result from it", asyn
   await userEvent.click(first.getByRole("button", { name: /Copy link/ }));
   await expect.poll(() => window.location.hash.length).toBeGreaterThan(1);
 
-  // A fresh app instance restores the whole session from the hash.
-  first.unmount();
+  // A fresh app instance restores the whole session from the hash; the first
+  // has to go, since these queries search the whole document. Retire it
+  // through the library's cleanup rather than its own unmount(): a root
+  // unmounted behind the library's back is unmounted a second time by the next
+  // test's cleanup, after which React renders nothing into later roots.
+  await cleanup();
   const second = await render(<App />);
   await expect
     .poll(
@@ -305,23 +307,11 @@ test("flags pasted invisible characters, refuses to simulate, and fixes them all
     .element(screen.getByText(/Fix the syntax errors to simulate/))
     .toBeInTheDocument();
 
-  // The lint panel is normally opened via a keybinding CM provides
-  // (lintKeymap), which this editor doesn't wire up; call the same command
-  // CodeMirror exports for it directly against the mounted view.
-  const view = EditorView.findFromDOM(screen.container);
-  expect(view).toBeTruthy();
-  openLintPanel(view!);
-
-  // Two fixable paste diagnostics \u2014 each carries its own fix plus the
-  // combined fix-all action.
-  const findFixAll = () =>
-    Array.from(
-      screen.container.querySelectorAll<HTMLButtonElement>(
-        ".cm-diagnosticAction",
-      ),
-    ).find((b) => b.textContent?.includes("Fix all"));
-  await expect.poll(() => findFixAll()).toBeTruthy();
-  await userEvent.click(findFixAll()!);
+  // Both paste diagnostics are semantics-preserving, so the panel offers them
+  // as one bulk apply.
+  await userEvent.click(
+    screen.getByRole("button", { name: "Fix all problems (2)" }),
+  );
 
   // One click cleans the whole paste: ZWSP removed, NBSP now a regular space.
   await expect
@@ -340,6 +330,66 @@ test("flags pasted invisible characters, refuses to simulate, and fixes them all
   await expect
     .poll(() => screen.container.textContent ?? "")
     .not.toContain("Fix the syntax errors to simulate");
+});
+
+test("rewrites a nonstandard operator from the problem's own Fix button", async () => {
+  const screen = await render(<App />);
+  await expect
+    .poll(() => screen.container.querySelector(".cm-content"))
+    .toBeTruthy();
+
+  await typeFormula(screen.container, "A && B && C");
+
+  // One fix for the whole chain, on the outermost finding — and a lone fix
+  // never gets a redundant bulk button next to its own.
+  const chainFix = screen.getByRole("button", { name: "Replace with AND()" });
+  await expect.element(chainFix).toBeInTheDocument();
+  expect(
+    Array.from(screen.container.querySelectorAll("button")).filter((b) =>
+      b.textContent?.startsWith("Fix all"),
+    ),
+  ).toEqual([]);
+  await userEvent.click(chainFix);
+
+  await expect
+    .poll(
+      () => screen.container.querySelector(".cm-content")?.textContent ?? "",
+    )
+    .toBe("AND(A, B, C)");
+  await expect
+    .element(screen.getByText("Parses correctly."))
+    .toBeInTheDocument();
+});
+
+test("keeps a semantics-changing fix out of the bulk apply", async () => {
+  const screen = await render(<App />);
+  await expect
+    .poll(() => screen.container.querySelector(".cm-content"))
+    .toBeTruthy();
+
+  await typeFormula(screen.container, 'LEN("a\u200Bb")');
+
+  // Deleting the character changes the string's value, so it is offered
+  // per-problem only — there is nothing to apply in bulk.
+  const fixButton = screen.getByRole("button", {
+    name: "Remove invisible character",
+  });
+  await expect.element(fixButton).toBeInTheDocument();
+  expect(
+    Array.from(screen.container.querySelectorAll("button")).filter((b) =>
+      b.textContent?.startsWith("Fix all"),
+    ),
+  ).toEqual([]);
+
+  await userEvent.click(fixButton);
+  await expect
+    .poll(
+      () => screen.container.querySelector(".cm-content")?.textContent ?? "",
+    )
+    .toBe('LEN("ab")');
+  await expect
+    .element(screen.getByText("Parses correctly."))
+    .toBeInTheDocument();
 });
 
 test("renders without console errors", async () => {

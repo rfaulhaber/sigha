@@ -43,4 +43,10 @@ export const checker = {
     `${name} does not accept ${rejected} for '${param}' — Salesforce rejects this formula at save.`,
   functionNotAvailable: (name: string, contextLabel: string) =>
     `${name} is not available in ${contextLabel}.`,
+  /** Quick-fix button labels for the diagnostics above. */
+  fixes: {
+    /** `standard` is the conventional form: `AND()`, `OR()`, `=`, `<>`. */
+    replaceNonstandardOperator: (standard: string) =>
+      `Replace with ${standard}`,
+  },
 };

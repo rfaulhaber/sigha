@@ -1,10 +1,13 @@
 import { lazy, Suspense, useMemo, useRef, useState } from "react";
-import { isBlankSource, parse } from "../syntax/index.ts";
-import { analyze } from "../analysis/index.ts";
+import {
+  isBlankSource,
+  type Diagnostic,
+  type TextEdit,
+} from "../syntax/index.ts";
 // Deep imports: the features barrel re-exports the simplifier, whose engine
 // dependency (decimal.js sets global config at module load) must stay in the
 // lazy chunks, not the first paint.
-import { lint } from "../features/linter.ts";
+import { diagnoseParsed } from "../features/linter.ts";
 import {
   decodePermalink,
   encodePermalink,
@@ -89,30 +92,10 @@ export function App() {
     return url;
   };
 
-  const { ast, diagnostics, syntaxErrors } = useMemo(() => {
-    const parsed = parse(source);
-    // Error-recovery can produce a complete AST from invalid text (e.g.
-    // pasted invisible characters recovered as trivia), so "is the syntax
-    // valid" must be read off the diagnostics, not off the AST shape.
-    const syntaxErrors = parsed.diagnostics.some(
-      (d) => d.severity === "error",
-    );
-    // Not trim(): trim() also strips NBSP/BOM-class paste artifacts, which
-    // would report a document containing only them as clean.
-    if (isBlankSource(source)) {
-      return {
-        ast: parsed.ast,
-        diagnostics: [] as ReturnType<typeof analyze>,
-        syntaxErrors,
-      };
-    }
-    const merged = [
-      ...parsed.diagnostics,
-      ...analyze(parsed.ast, contextId),
-      ...lint(parsed.ast, source, contextId),
-    ].sort((a, b) => a.span.start - b.span.start);
-    return { ast: parsed.ast, diagnostics: merged, syntaxErrors };
-  }, [source, contextId]);
+  const { ast, diagnostics, syntaxErrors } = useMemo(
+    () => diagnoseParsed(source, contextId),
+    [source, contextId],
+  );
 
   const context = getContext(contextId);
 
@@ -219,7 +202,11 @@ export function App() {
           </Suspense>
         )}
 
-        <ProblemsPanel source={source} diagnostics={diagnostics} />
+        <ProblemsPanel
+          source={source}
+          diagnostics={diagnostics}
+          onApplyFix={(edits) => editorRef.current?.applyEdits(edits, source)}
+        />
       </div>
 
       <section
@@ -357,7 +344,10 @@ function ModeSwitch({ preference, mode, cycle }: ThemeControl) {
     preference === "system"
       ? strings.following(strings[mode])
       : strings[preference];
-  const description = strings.action(current, strings[nextPreference(preference)]);
+  const description = strings.action(
+    current,
+    strings[nextPreference(preference)],
+  );
 
   return (
     <button
@@ -377,20 +367,48 @@ function ModeSwitch({ preference, mode, cycle }: ThemeControl) {
 
 interface ProblemsPanelProps {
   readonly source: string;
-  readonly diagnostics: ReturnType<typeof analyze>;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly onApplyFix: (edits: readonly TextEdit[]) => void;
 }
 
-function ProblemsPanel({ source, diagnostics }: ProblemsPanelProps) {
+/**
+ * Diagnostics readout, and the one place automatic fixes are offered: a button
+ * per fixable problem, plus a bulk apply. Bulk skips fixes that would change
+ * the formula's meaning — those need a per-problem decision — and the
+ * non-overlap invariant on `DiagnosticFix` is what lets the rest go in one edit.
+ */
+function ProblemsPanel({
+  source,
+  diagnostics,
+  onApplyFix,
+}: ProblemsPanelProps) {
+  const bulk = diagnostics.filter((d) => d.fix && !d.fix.changesSemantics);
+
   return (
     <Panel
       label={t().ui.problems.label}
       right={
         <span
           style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.7rem",
             color: palette.textMuted,
             fontSize: "0.72rem",
           }}
         >
+          {/* A lone fix's own button already covers it; bulk earns its place
+              only when it batches. */}
+          {bulk.length >= 2 ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => onApplyFix(bulk.flatMap((d) => d.fix!.edits))}
+              title={t().ui.problems.fixAllTitle}
+            >
+              {t().ui.problems.fixAll(bulk.length)}
+            </button>
+          ) : null}
           {diagnostics.length === 0
             ? t().ui.problems.none
             : t().ui.problems.count(diagnostics.length)}
@@ -467,6 +485,21 @@ function ProblemsPanel({ source, diagnostics }: ProblemsPanelProps) {
                     </a>
                   ) : null}
                 </span>
+                {d.fix ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ alignSelf: "center", flex: "none" }}
+                    onClick={() => onApplyFix(d.fix!.edits)}
+                    title={
+                      d.fix.changesSemantics
+                        ? t().ui.problems.fixChangesSemantics
+                        : undefined
+                    }
+                  >
+                    {d.fix.title}
+                  </button>
+                ) : null}
               </li>
             );
           })}

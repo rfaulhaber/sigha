@@ -19,7 +19,7 @@ import { lintGutter } from "@codemirror/lint";
 import { completionKeymap, snippet } from "@codemirror/autocomplete";
 // Deep import — keeps the engine-dependent simplifier out of the eager bundle.
 import { format } from "../../features/formatter.ts";
-import { PASTE_CHAR_PATTERN } from "../../syntax/index.ts";
+import { PASTE_CHAR_PATTERN, type TextEdit } from "../../syntax/index.ts";
 import { t } from "../../i18n/index.ts";
 import type { ThemeMode } from "../../theme/theme.ts";
 import { sfHighlight } from "./highlight.ts";
@@ -30,11 +30,20 @@ import { sfHover } from "./hover.ts";
 import { contextField, setContext } from "./contextField.ts";
 
 /** Imperative handle so the parent can trigger a format from a toolbar button,
- * replace the document (the simplifier's Apply), or insert a function template
- * (the Insert-function picker). */
+ * replace the document (the simplifier's Apply), apply diagnostic fixes (the
+ * Problems panel), or insert a function template (the Insert-function
+ * picker). */
 export interface EditorHandle {
   format(): void;
   setText(text: string): void;
+  /**
+   * Apply diagnostic fix edits as one transaction — CodeMirror maps the
+   * offsets against each other, so non-overlapping edits need no ordering.
+   * `expectedDoc` is the text the edits were computed against; a mismatch
+   * means a keystroke landed in between and the edits are stale, so nothing
+   * is applied and the next render supplies freshly positioned ones.
+   */
+  applyEdits(edits: readonly TextEdit[], expectedDoc: string): void;
   /** Apply a CodeMirror snippet template at the cursor, replacing any
    * selection, and return focus to the editor so Tab walks the fields. */
   insertSnippet(template: string): void;
@@ -105,6 +114,19 @@ export function FormulaEditor({
         });
       }
     },
+    applyEdits(edits: readonly TextEdit[], expectedDoc: string) {
+      const view = viewRef.current;
+      if (!view || view.state.doc.toString() !== expectedDoc) {
+        return;
+      }
+      view.dispatch({
+        changes: edits.map((e) => ({
+          from: e.span.start,
+          to: e.span.end,
+          insert: e.newText,
+        })),
+      });
+    },
     insertSnippet(template: string) {
       const view = viewRef.current;
       if (!view) {
@@ -144,9 +166,9 @@ export function FormulaEditor({
           placeholder(t().ui.editor.placeholder),
           // Render every character the lexer diagnoses as a paste artifact —
           // the pattern is derived from the same classification (chars.ts),
-          // so a diagnosed character always gets a visible placeholder. That
-          // placeholder is also the quick-fix's hover target: the characters
-          // themselves are zero-width.
+          // so a diagnosed character always gets a visible placeholder. The
+          // characters are themselves zero-width, so without it the editor
+          // would show nothing where the Problems panel reports a fault.
           highlightSpecialChars({ addSpecialChars: PASTE_CHAR_PATTERN }),
           // Mount tooltips on <body>: the .rise entrance animations create
           // stacking contexts on the page sections, so tooltips rendered

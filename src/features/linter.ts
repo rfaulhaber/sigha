@@ -1,7 +1,9 @@
 import {
   parse,
   span,
+  spanLength,
   childrenOf,
+  isBlankSource,
   visitExpr,
   codePointHex,
   findPasteCharRuns,
@@ -48,23 +50,94 @@ const EQUALITY_OPS: ReadonlySet<BinaryOp["op"]> = new Set([
   "!=",
 ]);
 
+export interface DiagnosedFormula {
+  /** Always present; error recovery yields a partial tree, never nothing. */
+  readonly ast: Expr;
+  readonly diagnostics: readonly Diagnostic[];
+  /**
+   * Whether the *syntax* is invalid. Read off the parse diagnostics, not the
+   * AST shape: recovery can produce a complete tree from invalid text (e.g.
+   * pasted invisible characters recovered as trivia).
+   */
+  readonly syntaxErrors: boolean;
+}
+
 /**
  * Full diagnostic pipeline — parse (syntax + recovery), analyze (types, arity,
  * availability, return type), lint (style/robustness) — in source order. The
- * single entry point for the editor's lint source and the UI Problems panel.
+ * single entry point for the editor's lint source and the UI Problems panel;
+ * both consume the same AST and the same diagnostics from one pass.
  * Lives here rather than in analysis/ because the dependency arrow points
  * features → analysis, never back.
  */
+export function diagnoseParsed(
+  source: string,
+  contextId: string,
+): DiagnosedFormula {
+  const { ast, diagnostics } = parse(source);
+  const syntaxErrors = diagnostics.some((d) => d.severity === "error");
+  // Not trim(): trim() also strips NBSP/BOM-class paste artifacts, which would
+  // report a document containing only them as clean.
+  if (isBlankSource(source)) {
+    return { ast, diagnostics: [], syntaxErrors };
+  }
+  const merged = [
+    ...diagnostics,
+    ...analyze(ast, source, contextId),
+    ...lint(ast, source, contextId),
+  ].sort((a, b) => a.span.start - b.span.start);
+  return { ast, diagnostics: withDisjointFixes(merged), syntaxErrors };
+}
+
+/** The diagnostics alone, for callers that already have (or don't need) the AST. */
 export function diagnose(
   source: string,
   contextId: string,
 ): readonly Diagnostic[] {
-  const { ast, diagnostics } = parse(source);
-  return [
-    ...diagnostics,
-    ...analyze(ast, contextId),
-    ...lint(ast, source, contextId),
-  ].sort((a, b) => a.span.start - b.span.start);
+  return diagnoseParsed(source, contextId).diagnostics;
+}
+
+/**
+ * Enforce the `DiagnosticFix` invariant across producers: a structural fix
+ * from the checker can textually contain a character-level fix from the lexer
+ * (a smart-quoted string inside `"a" == b`). Keep the smaller fix and drop the
+ * larger one — the character fix is the prerequisite, and the structural fix
+ * comes back on the re-diagnose that follows it. With every surviving fix
+ * disjoint, any subset applies as one batch.
+ */
+function withDisjointFixes(
+  diagnostics: readonly Diagnostic[],
+): readonly Diagnostic[] {
+  const fixable = diagnostics
+    .filter((d) => d.fix)
+    .sort((a, b) => editedLength(a) - editedLength(b));
+  const kept: Diagnostic[] = [];
+  const dropped = new Set<Diagnostic>();
+  for (const d of fixable) {
+    if (kept.some((k) => overlaps(k, d))) {
+      dropped.add(d);
+    } else {
+      kept.push(d);
+    }
+  }
+  if (dropped.size === 0) {
+    return diagnostics;
+  }
+  return diagnostics.map((d) =>
+    dropped.has(d) ? { ...d, fix: undefined } : d,
+  );
+}
+
+function editedLength(d: Diagnostic): number {
+  return (d.fix?.edits ?? []).reduce((n, e) => n + spanLength(e.span), 0);
+}
+
+function overlaps(a: Diagnostic, b: Diagnostic): boolean {
+  return (a.fix?.edits ?? []).some((x) =>
+    (b.fix?.edits ?? []).some(
+      (y) => x.span.start < y.span.end && y.span.start < x.span.end,
+    ),
+  );
 }
 
 /** Run only the lint rules over an already-parsed formula. */
@@ -141,6 +214,7 @@ function checkInvisibleInString(node: StringLit, out: Diagnostic[]): void {
       fix: {
         title: t().syntax.lexer.fixes.removeInvisible(run.count),
         edits: [{ span: run.span, newText: "" }],
+        changesSemantics: true,
       },
     });
   }

@@ -6,8 +6,6 @@
 export const ui = {
   editor: {
     placeholder: "Type a Salesforce formula...",
-    fixAllSpecialChars: (n: number) =>
-      `Fix all invisible/typographic characters (${n})`,
   },
   toolbar: {
     format: "Format",
@@ -34,6 +32,11 @@ export const ui = {
     count: (n: number) => `${n} problem${n === 1 ? "" : "s"}`,
     clean: "Parses correctly.",
     docsLink: "docs ↗",
+    fixAll: (n: number) => `Fix all problems (${n})`,
+    fixAllTitle:
+      "Apply every fix that leaves the formula's meaning unchanged, in one edit",
+    /** Why a fix has its own button but is left out of "Fix all". */
+    fixChangesSemantics: "This fix changes what the formula evaluates to",
   },
   simulate: {
     label: "Simulate",

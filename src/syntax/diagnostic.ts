@@ -48,15 +48,21 @@ export interface TextEdit {
 }
 
 /**
- * Machine-applicable remedy attached to a diagnostic, surfaced by the editor
- * as a quick-fix action. Edits address original-source offsets; the edits of
- * one fix never overlap, and fixes of distinct diagnostics never overlap
- * either, so any subset can be applied in one batch.
+ * Machine-applicable remedy attached to a diagnostic, surfaced by the Problems
+ * panel as a per-problem button. Edits address original-source offsets; the
+ * edits of one fix never overlap, and fixes of distinct diagnostics never
+ * overlap either, so any subset can be applied in one batch.
  */
 export interface DiagnosticFix {
   /** Short imperative label (localized), e.g. "Remove invisible character". */
   readonly title: string;
   readonly edits: readonly TextEdit[];
+  /**
+   * Set when applying the fix changes what the formula evaluates to (rather
+   * than only how it is written). Such a fix is never part of a bulk apply —
+   * it needs an explicit, per-problem decision.
+   */
+  readonly changesSemantics?: boolean;
 }
 
 export interface Diagnostic {
@@ -66,6 +72,6 @@ export interface Diagnostic {
   readonly message: string;
   /** Optional "learn more" link, rendered by the Problems panel. */
   readonly docsUrl?: string | undefined;
-  /** Optional quick-fix, rendered by the editor as a clickable action. */
+  /** Optional quick-fix, rendered by the Problems panel as a button. */
   readonly fix?: DiagnosticFix | undefined;
 }

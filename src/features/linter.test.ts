@@ -132,6 +132,9 @@ describe("linter: invisible characters inside string literals", () => {
     expect(diags[0]!.fix?.edits).toEqual([
       { span: { start: 2, end: 3 }, newText: "" },
     ]);
+    // The character is part of the compared value, so removing it is not a
+    // cosmetic fix — it must never ride along with a bulk apply.
+    expect(diags[0]!.fix?.changesSemantics).toBe(true);
   });
 
   it("does not flag a non-breaking space inside a string literal", () => {
@@ -162,5 +165,33 @@ describe("diagnose: full pipeline", () => {
     expect(
       diagnose("IF(ISBLANK(Amount), 0, Amount * 1.1)", "formula_field"),
     ).toEqual([]);
+  });
+
+  it("treats whitespace-only input as nothing to report", () => {
+    expect(diagnose("   ", "formula_field")).toEqual([]);
+  });
+});
+
+describe("diagnose: fixes of distinct diagnostics never overlap", () => {
+  // The checker's rewrite of `&&` spans the whole formula, swallowing the
+  // lexer's smart-quote fix inside it.
+  const src = "\u201Ca\u201D == b && c";
+
+  const fixes = (source: string) =>
+    diagnose(source, "formula_field").filter((d) => d.fix);
+
+  it("keeps the character-level fix and drops the structural one", () => {
+    expect(fixes(src).map((d) => d.code)).toEqual(["confusable-character"]);
+  });
+
+  it("re-offers the structural fix once the characters are fixed", () => {
+    const [quotes] = fixes(src);
+    let fixed = src;
+    for (const e of [...quotes!.fix!.edits].reverse()) {
+      fixed =
+        fixed.slice(0, e.span.start) + e.newText + fixed.slice(e.span.end);
+    }
+    expect(fixed).toBe('"a" == b && c');
+    expect(fixes(fixed).map((d) => d.code)).toEqual(["nonstandard-operator"]);
   });
 });

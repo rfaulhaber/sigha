@@ -1,6 +1,6 @@
 import { expect, test, beforeEach, afterEach, vi } from "vitest";
 import { userEvent } from "vitest/browser";
-import { render } from "vitest-browser-react";
+import { cleanup, render } from "vitest-browser-react";
 import { EditorView } from "@codemirror/view";
 import { openLintPanel } from "@codemirror/lint";
 import { App } from "./App.tsx";
@@ -256,8 +256,12 @@ test("copies a permalink and restores formula, inputs, and result from it", asyn
   await userEvent.click(first.getByRole("button", { name: /Copy link/ }));
   await expect.poll(() => window.location.hash.length).toBeGreaterThan(1);
 
-  // A fresh app instance restores the whole session from the hash.
-  first.unmount();
+  // A fresh app instance restores the whole session from the hash; the first
+  // has to go, since these queries search the whole document. Retire it
+  // through the library's cleanup rather than its own unmount(): a root
+  // unmounted behind the library's back is unmounted a second time by the next
+  // test's cleanup, after which React renders nothing into later roots.
+  await cleanup();
   const second = await render(<App />);
   await expect
     .poll(

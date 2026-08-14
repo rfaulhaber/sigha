@@ -11,6 +11,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     include: ["**/*.browser.test.{ts,tsx}"],
+    // Same trap vitest.config.ts guards against: .direnv/flake-inputs holds a
+    // store snapshot of this repo, and the include glob would collect every
+    // browser suite a second time from frozen sources.
+    exclude: ["**/node_modules/**", "**/.direnv/**"],
     browser: {
       enabled: true,
       headless: true,

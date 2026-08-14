@@ -289,24 +289,42 @@ Registry- and AST-driven rules, each with id, severity, span, message, docs link
 - Function-availability and return-type findings from the analysis layer surface in the same
   panel.
 
-### 8.5 Permalinks
+### 8.5 Test cases
+
+A regexr.com-style assertion table, generalizing the simulation form (§8.1) to many rows: each
+row supplies a value per referenced field plus an expected outcome — a literal value, a blank
+result, or the runtime `#Error!` — and re-evaluates live as the formula or any cell changes.
+Field types are a column property, one override per field shared by every row; a row's cells
+carry only a value and a blank flag, so adding a row never re-asks for a type. Comparison is
+typed, never string-rendered: the expected text is parsed against the actual result's own type
+and compared as a value (`Decimal.equals` for numerics, case-sensitive `===` for text, fieldwise
+for dates), so `1.5` matches a `1.50`-rendered result and a text result that happens to read
+`#Error!` never satisfies an error expectation. A formula with syntax errors shows every row as
+unresolved rather than guessing pass or fail (rule 1); a row whose expected text fails to parse
+against the result's type is reported as a distinct mis-specified state rather than silently
+passing or failing against a fallback. A suite with at least one row travels in the permalink
+alongside the simulation form's fields.
+
+### 8.6 Permalinks
 
 `lz-string` compressToEncodedURIComponent of
-`{ v: 1, context, formula, fields: {name: {type, blank, value}}, blankMode }` in the URL hash.
-Decoded on load; version field for forward compatibility. This is the sharing/growth mechanism —
-the "Copy link" affordance should be prominent next to results.
+`{ v: 1, context, formula, fields: {name: {type, blank, value}}, blankMode, tests? }` in the URL
+hash, where `tests` (§8.5's suite, present only once it has a row) carries its own `rows`,
+per-field `types`, and `blankMode`. Decoded on load; version field for forward compatibility.
+This is the sharing/growth mechanism — the "Copy link" affordance should be prominent next to
+results.
 
 ## 9. UI
 
 Single-page layout: context picker (with Tier 2 disclaimer where applicable) → CodeMirror editor
 (highlighting, inline squiggles, hover docs, autocomplete) → tabbed or stacked panels:
-**Simulate** (field form + result + blank-mode toggle), **Problems** (diagnostics + lint, each
-fixable finding with its own Fix button and a fix-all in the panel header — the only place
-automatic fixes are applied from), **Simplify** (step log + apply button), **Format** (one-click,
-in-editor). Mobile-usable but desktop-first. Errors and empty states follow direction-not-mood
-copy. Visual design follows the "calibrated instrument" direction; product name, palette, and any
-cross-linking live in one theme module (`src/theme/`) so branding changes stay a one-file change.
-The tool is hosted at `sigha.app`.
+**Simulate** (field form + result + blank-mode toggle), **Tests** (assertion table with live
+pass/fail), **Problems** (diagnostics + lint, each fixable finding with its own Fix button and a
+fix-all in the panel header — the only place automatic fixes are applied from), **Simplify**
+(step log + apply button), **Format** (one-click, in-editor). Mobile-usable but desktop-first.
+Errors and empty states follow direction-not-mood copy. Visual design follows the "calibrated
+instrument" direction; product name, palette, and any cross-linking live in one theme module
+(`src/theme/`) so branding changes stay a one-file change. The tool is hosted at `sigha.app`.
 
 ## 10. Testing & conformance
 

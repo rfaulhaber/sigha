@@ -96,7 +96,6 @@ export const ui = {
     salesforceDocs: "Salesforce docs ↗",
   },
   footer: {
-    platformLink: (host: string) => `${host} ↗`,
     sourceLink: "GitHub ↗",
   },
 };

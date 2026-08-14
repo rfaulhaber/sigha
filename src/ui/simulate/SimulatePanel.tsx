@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { assertNever, type Expr, type Span } from "../../syntax/index.ts";
+import { assertNever, type Expr } from "../../syntax/index.ts";
 import { extractFields } from "../../features/index.ts";
 import type { PermalinkField } from "../../features/permalink.ts";
 import {
@@ -22,6 +22,7 @@ import {
   renderResult,
   type ResultOutcome,
 } from "./fieldValue.ts";
+import { snippetOf } from "./snippet.ts";
 
 /**
  * The simulation's evaluation outcome: a typed discriminant carried alongside
@@ -334,28 +335,18 @@ function collectTraceRows(
   }
 }
 
-const SNIPPET_MAX = 60;
-
-/** Whitespace-collapsed, middle-truncated source slice for a trace row. */
-function snippetOf(source: string, span: Span): string {
-  const collapsed = source
-    .slice(span.start, span.end)
-    .replace(/\s+/g, " ")
-    .trim();
-  if (collapsed.length <= SNIPPET_MAX) {
-    return collapsed;
-  }
-  const head = Math.ceil((SNIPPET_MAX - 1) / 2);
-  const tail = SNIPPET_MAX - 1 - head;
-  return `${collapsed.slice(0, head)}…${collapsed.slice(collapsed.length - tail)}`;
-}
-
 /** A traced value at the same display scale as the result readout. */
 function renderTracedValue(result: EvalResult): string {
   return renderResult(isError(result) ? result : materialize(result));
 }
 
-/** Row value color: muted for a skipped node, danger for #Error!, else normal. */
+/**
+ * Row color: muted for a skipped node, danger for #Error!, else normal. A
+ * skipped row dims through color alone — stacking a row-wide `opacity` on
+ * top of an already-muted value would compound past the light palette's
+ * documented 4.5:1 floor (theme.ts), so the snippet and the value always
+ * share this one color, never opacity.
+ */
 function stepColor(result: EvalResult | undefined): string {
   if (result === undefined) {
     return palette.textMuted;
@@ -401,6 +392,7 @@ function StepsSection({
         {open
           ? rows.map(({ node, depth }) => {
               const result = trace.get(node);
+              const skipped = result === undefined;
               return (
                 <div
                   key={`${node.span.start}:${node.span.end}`}
@@ -413,10 +405,14 @@ function StepsSection({
                     padding: "0.32rem 1rem",
                     paddingLeft: `${1 + depth * 0.9}rem`,
                     fontSize: "0.8rem",
-                    opacity: result === undefined ? 0.55 : 1,
                   }}
                 >
-                  <code style={{ overflowWrap: "anywhere" }}>
+                  <code
+                    style={{
+                      overflowWrap: "anywhere",
+                      color: skipped ? palette.textMuted : palette.text,
+                    }}
+                  >
                     {snippetOf(source, node.span)}
                   </code>
                   <span
@@ -426,7 +422,7 @@ function StepsSection({
                       color: stepColor(result),
                     }}
                   >
-                    {result === undefined
+                    {skipped
                       ? t().ui.simulate.stepsNotEvaluated
                       : renderTracedValue(result)}
                   </span>

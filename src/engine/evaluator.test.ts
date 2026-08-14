@@ -390,13 +390,19 @@ describe("engine: ported functions (corpus-verified)", () => {
   // failing fallback propagates its own error, and a clean first argument
   // never evaluates the fallback at all.
   it("IFERROR with a failing fallback propagates the fallback's error", () => {
-    const both = ev('IFERROR(DATETIMEVALUE("sample "), DATETIMEVALUE("sample "))');
+    const both = ev(
+      'IFERROR(DATETIMEVALUE("sample "), DATETIMEVALUE("sample "))',
+    );
     expect(isError(both)).toBe(true);
     expect(
-      s('TEXT(IFERROR(DATETIMEVALUE("sample "), DATETIMEVALUE("2005-11-15 17:00:00")))'),
+      s(
+        'TEXT(IFERROR(DATETIMEVALUE("sample "), DATETIMEVALUE("2005-11-15 17:00:00")))',
+      ),
     ).toBe("2005-11-15 17:00:00Z");
     expect(
-      s('TEXT(IFERROR(DATETIMEVALUE("2005-11-15 17:00:00"), DATETIMEVALUE("sample ")))'),
+      s(
+        'TEXT(IFERROR(DATETIMEVALUE("2005-11-15 17:00:00"), DATETIMEVALUE("sample ")))',
+      ),
     ).toBe("2005-11-15 17:00:00Z");
   });
 });
@@ -901,15 +907,58 @@ describe("engine: sub-expression trace (env.trace)", () => {
   });
 });
 
-describe("engine: trace hook has zero effect on evaluation when absent", () => {
-  it("evaluates identically to the pre-trace behavior on a few conformance-style cases", () => {
-    expect(n("0.1 + 0.2")).toBe("0.3");
-    expect(n("(1 / 9) * 9")).toBe("1");
-    expect(
-      s('IF(ISBLANK(Discount__c), "a", "b")', {
-        fields: { Discount__c: blank("Number") },
-        blankMode: "blank",
-      }),
-    ).toBe("a");
+describe("engine: attaching env.trace never changes the evaluated result", () => {
+  function evalBoth(
+    source: string,
+    opts: { fields?: Record<string, SfValue>; blankMode?: BlankMode } = {},
+  ): { untraced: EvalResult; traced: EvalResult } {
+    const ast = parse(source).ast;
+    const base = {
+      fields: new Map(Object.entries(opts.fields ?? {})),
+      blankMode: opts.blankMode ?? "zero",
+      now: { epochMillis: Date.UTC(2026, 6, 21) },
+    };
+    return {
+      untraced: evaluateFormula(ast, base),
+      traced: evaluateFormula(ast, { ...base, trace: () => {} }),
+    };
+  }
+
+  it("returns an identical result whether or not a trace callback is attached", () => {
+    // Representative cases: plain arithmetic, guard-digit-sensitive math, a
+    // short-circuiting IF/AND, and a simulated #Error — different paths
+    // through evaluate/evalBinary/evalCall, all funneled through the same
+    // trace wrapper.
+    const { untraced: sum, traced: tracedSum } = evalBoth("0.1 + 0.2");
+    expect(tracedSum).toEqual(sum);
+
+    const { untraced: guard, traced: tracedGuard } = evalBoth("(1 / 9) * 9");
+    expect(tracedGuard).toEqual(guard);
+
+    const { untraced: branch, traced: tracedBranch } = evalBoth(
+      "IF(AND(foo, bar), baz + 13, quux + 14)",
+      {
+        fields: {
+          foo: bool(true),
+          bar: bool(false),
+          baz: num(1),
+          quux: num(2),
+        },
+      },
+    );
+    expect(tracedBranch).toEqual(branch);
+
+    const { untraced: divErr, traced: tracedDivErr } = evalBoth("1 / 0 + 2");
+    expect(isError(divErr)).toBe(true);
+    expect(tracedDivErr).toEqual(divErr);
+  });
+
+  it("throws the same UnsupportedError whether or not a trace callback is attached", () => {
+    const ast = parse("PRIORVALUE(Amount)").ast;
+    const base: EvalEnv = { fields: new Map(), blankMode: "zero" };
+    expect(() => evaluateFormula(ast, base)).toThrow(UnsupportedError);
+    expect(() => evaluateFormula(ast, { ...base, trace: () => {} })).toThrow(
+      UnsupportedError,
+    );
   });
 });

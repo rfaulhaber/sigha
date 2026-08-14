@@ -340,13 +340,16 @@ test("rewrites a nonstandard operator from the problem's own Fix button", async 
 
   await typeFormula(screen.container, "A && B && C");
 
-  // One fix for the whole chain, on the outermost finding.
-  await expect
-    .element(screen.getByRole("button", { name: "Fix all problems (1)" }))
-    .toBeInTheDocument();
-  await userEvent.click(
-    screen.getByRole("button", { name: "Replace with AND()" }),
-  );
+  // One fix for the whole chain, on the outermost finding — and a lone fix
+  // never gets a redundant bulk button next to its own.
+  const chainFix = screen.getByRole("button", { name: "Replace with AND()" });
+  await expect.element(chainFix).toBeInTheDocument();
+  expect(
+    Array.from(screen.container.querySelectorAll("button")).filter((b) =>
+      b.textContent?.startsWith("Fix all"),
+    ),
+  ).toEqual([]);
+  await userEvent.click(chainFix);
 
   await expect
     .poll(

@@ -397,7 +397,9 @@ function ProblemsPanel({
             fontSize: "0.72rem",
           }}
         >
-          {bulk.length > 0 ? (
+          {/* A lone fix's own button already covers it; bulk earns its place
+              only when it batches. */}
+          {bulk.length >= 2 ? (
             <button
               type="button"
               className="btn"

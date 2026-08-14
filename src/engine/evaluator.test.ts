@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { parse } from "../syntax/index.ts";
+import { parse, type Expr } from "../syntax/index.ts";
 import { evaluateFormula, type EvalEnv } from "./evaluator.ts";
 import {
   asBool,
   asDecimal,
   asText,
   blank,
+  bool,
   isError,
   num,
   UnsupportedError,
   type BlankMode,
+  type EvalResult,
   type SfValue,
 } from "./value.ts";
 
@@ -388,13 +390,19 @@ describe("engine: ported functions (corpus-verified)", () => {
   // failing fallback propagates its own error, and a clean first argument
   // never evaluates the fallback at all.
   it("IFERROR with a failing fallback propagates the fallback's error", () => {
-    const both = ev('IFERROR(DATETIMEVALUE("sample "), DATETIMEVALUE("sample "))');
+    const both = ev(
+      'IFERROR(DATETIMEVALUE("sample "), DATETIMEVALUE("sample "))',
+    );
     expect(isError(both)).toBe(true);
     expect(
-      s('TEXT(IFERROR(DATETIMEVALUE("sample "), DATETIMEVALUE("2005-11-15 17:00:00")))'),
+      s(
+        'TEXT(IFERROR(DATETIMEVALUE("sample "), DATETIMEVALUE("2005-11-15 17:00:00")))',
+      ),
     ).toBe("2005-11-15 17:00:00Z");
     expect(
-      s('TEXT(IFERROR(DATETIMEVALUE("2005-11-15 17:00:00"), DATETIMEVALUE("sample ")))'),
+      s(
+        'TEXT(IFERROR(DATETIMEVALUE("2005-11-15 17:00:00"), DATETIMEVALUE("sample ")))',
+      ),
     ).toBe("2005-11-15 17:00:00Z");
   });
 });
@@ -755,5 +763,202 @@ describe("engine: typeless blanks propagate through arithmetic in BOTH modes", (
 describe("engine: POWER refuses simulation (unverified against ^)", () => {
   it("throws UnsupportedError rather than guessing", () => {
     expect(() => ev("POWER(2, 3)")).toThrow(UnsupportedError);
+  });
+});
+
+describe("engine: sub-expression trace (env.trace)", () => {
+  function traceEval(
+    source: string,
+    opts: { fields?: Record<string, SfValue>; blankMode?: BlankMode } = {},
+  ): { ast: Expr; trace: Map<Expr, EvalResult> } {
+    const ast = parse(source).ast;
+    const trace = new Map<Expr, EvalResult>();
+    const env: EvalEnv = {
+      fields: new Map(Object.entries(opts.fields ?? {})),
+      blankMode: opts.blankMode ?? "zero",
+      now: { epochMillis: Date.UTC(2026, 6, 21) },
+      trace: (node, result) => trace.set(node, result),
+    };
+    evaluateFormula(ast, env);
+    return { ast, trace };
+  }
+
+  it("IF/AND: traces the taken branch, omits the skipped one and its children", () => {
+    const { ast, trace } = traceEval("IF(AND(foo, bar), baz + 13, quux + 14)", {
+      fields: { foo: bool(true), bar: bool(false), baz: num(1), quux: num(2) },
+    });
+    if (ast.kind !== "FunctionCall") {
+      throw new Error("expected FunctionCall");
+    }
+    const [cond, thenExpr, elseExpr] = ast.args;
+    expect(trace.get(cond!)).toEqual(bool(false));
+    expect(asDecimal(trace.get(elseExpr!) as SfValue).toString()).toBe("16");
+    expect(trace.has(thenExpr!)).toBe(false);
+    if (thenExpr!.kind === "BinaryOp") {
+      expect(trace.has(thenExpr.left)).toBe(false);
+      expect(trace.has(thenExpr.right)).toBe(false);
+    }
+  });
+
+  it("OR: traces evaluated args up to the true one, omits the rest", () => {
+    const { ast, trace } = traceEval("OR(a, b, c)", {
+      fields: { a: bool(false), b: bool(true), c: bool(false) },
+    });
+    if (ast.kind !== "FunctionCall") {
+      throw new Error("expected FunctionCall");
+    }
+    const [a, b, c] = ast.args;
+    expect(trace.get(a!)).toEqual(bool(false));
+    expect(trace.get(b!)).toEqual(bool(true));
+    expect(trace.has(c!)).toBe(false);
+  });
+
+  it("CASE: unmatched whens are traced, their thens are absent, pairs after the match are absent", () => {
+    const { ast, trace } = traceEval("CASE(x, 1, r1, 2, r2, 3, r3, rElse)", {
+      fields: {
+        x: num(2),
+        r1: num(100),
+        r2: num(200),
+        r3: num(300),
+        rElse: num(999),
+      },
+    });
+    if (ast.kind !== "FunctionCall") {
+      throw new Error("expected FunctionCall");
+    }
+    const [subject, when1, then1, when2, then2, when3, then3, elseExpr] =
+      ast.args;
+    expect(trace.has(subject!)).toBe(true);
+    expect(trace.has(when1!)).toBe(true); // evaluated, doesn't match
+    expect(trace.has(then1!)).toBe(false); // never reached
+    expect(trace.has(when2!)).toBe(true); // evaluated, matches
+    expect(trace.has(then2!)).toBe(true); // the taken branch
+    expect(trace.has(when3!)).toBe(false); // matched already; loop stopped
+    expect(trace.has(then3!)).toBe(false);
+    expect(trace.has(elseExpr!)).toBe(false);
+  });
+
+  it("&& and || short-circuit like AND/OR, leaving the unevaluated operand untraced", () => {
+    const and = traceEval("a && b", {
+      fields: { a: bool(false), b: bool(true) },
+    });
+    if (and.ast.kind !== "BinaryOp") {
+      throw new Error("expected BinaryOp");
+    }
+    expect(and.trace.has(and.ast.left)).toBe(true);
+    expect(and.trace.has(and.ast.right)).toBe(false);
+
+    const or = traceEval("a || b", {
+      fields: { a: bool(true), b: bool(false) },
+    });
+    if (or.ast.kind !== "BinaryOp") {
+      throw new Error("expected BinaryOp");
+    }
+    expect(or.trace.has(or.ast.left)).toBe(true);
+    expect(or.trace.has(or.ast.right)).toBe(false);
+  });
+
+  it("traces a blank numeric FieldRef as 0 in zero mode, blank in blank mode", () => {
+    const zero = traceEval("Amount + 1", {
+      fields: { Amount: blank("Number") },
+      blankMode: "zero",
+    });
+    if (zero.ast.kind !== "BinaryOp") {
+      throw new Error("expected BinaryOp");
+    }
+    const zeroField = zero.trace.get(zero.ast.left) as SfValue;
+    expect(zeroField.blank).toBe(false);
+    expect(asDecimal(zeroField).toString()).toBe("0");
+
+    const blanked = traceEval("Amount + 1", {
+      fields: { Amount: blank("Number") },
+      blankMode: "blank",
+    });
+    if (blanked.ast.kind !== "BinaryOp") {
+      throw new Error("expected BinaryOp");
+    }
+    const blankField = blanked.trace.get(blanked.ast.left) as SfValue;
+    expect(blankField.blank).toBe(true);
+  });
+
+  it("traces #Error! at the failing node and at every ancestor it passes through", () => {
+    const { ast, trace } = traceEval("1 / 0 + 2");
+    if (ast.kind !== "BinaryOp") {
+      throw new Error("expected BinaryOp");
+    }
+    expect(isError(trace.get(ast.left)!)).toBe(true); // 1 / 0
+    expect(isError(trace.get(ast)!)).toBe(true); // the whole expression
+  });
+
+  it("keeps a partial trace of nodes evaluated before an UnsupportedError, and still throws", () => {
+    const ast = parse("ABS(1) + PRIORVALUE(Amount)").ast;
+    if (ast.kind !== "BinaryOp") {
+      throw new Error("expected BinaryOp");
+    }
+    const trace = new Map<Expr, EvalResult>();
+    const env: EvalEnv = {
+      fields: new Map(),
+      blankMode: "zero",
+      trace: (node, result) => trace.set(node, result),
+    };
+    expect(() => evaluateFormula(ast, env)).toThrow(UnsupportedError);
+    expect(trace.has(ast.left)).toBe(true); // ABS(1) fully evaluated first
+    expect(trace.has(ast)).toBe(false); // the outer + never completes
+  });
+});
+
+describe("engine: attaching env.trace never changes the evaluated result", () => {
+  function evalBoth(
+    source: string,
+    opts: { fields?: Record<string, SfValue>; blankMode?: BlankMode } = {},
+  ): { untraced: EvalResult; traced: EvalResult } {
+    const ast = parse(source).ast;
+    const base = {
+      fields: new Map(Object.entries(opts.fields ?? {})),
+      blankMode: opts.blankMode ?? "zero",
+      now: { epochMillis: Date.UTC(2026, 6, 21) },
+    };
+    return {
+      untraced: evaluateFormula(ast, base),
+      traced: evaluateFormula(ast, { ...base, trace: () => {} }),
+    };
+  }
+
+  it("returns an identical result whether or not a trace callback is attached", () => {
+    // Representative cases: plain arithmetic, guard-digit-sensitive math, a
+    // short-circuiting IF/AND, and a simulated #Error — different paths
+    // through evaluate/evalBinary/evalCall, all funneled through the same
+    // trace wrapper.
+    const { untraced: sum, traced: tracedSum } = evalBoth("0.1 + 0.2");
+    expect(tracedSum).toEqual(sum);
+
+    const { untraced: guard, traced: tracedGuard } = evalBoth("(1 / 9) * 9");
+    expect(tracedGuard).toEqual(guard);
+
+    const { untraced: branch, traced: tracedBranch } = evalBoth(
+      "IF(AND(foo, bar), baz + 13, quux + 14)",
+      {
+        fields: {
+          foo: bool(true),
+          bar: bool(false),
+          baz: num(1),
+          quux: num(2),
+        },
+      },
+    );
+    expect(tracedBranch).toEqual(branch);
+
+    const { untraced: divErr, traced: tracedDivErr } = evalBoth("1 / 0 + 2");
+    expect(isError(divErr)).toBe(true);
+    expect(tracedDivErr).toEqual(divErr);
+  });
+
+  it("throws the same UnsupportedError whether or not a trace callback is attached", () => {
+    const ast = parse("PRIORVALUE(Amount)").ast;
+    const base: EvalEnv = { fields: new Map(), blankMode: "zero" };
+    expect(() => evaluateFormula(ast, base)).toThrow(UnsupportedError);
+    expect(() => evaluateFormula(ast, { ...base, trace: () => {} })).toThrow(
+      UnsupportedError,
+    );
   });
 });

@@ -57,6 +57,8 @@ export const ui = {
     copied: "Copied!",
     linkInUrlBar: "Link is in the URL bar",
     copyLinkTitle: "Copy a link that restores this formula, inputs, and result",
+    stepsLabel: "Steps",
+    stepsNotEvaluated: "not evaluated",
   },
   simplify: {
     label: "Simplify",

@@ -1,11 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type { Expr } from "../../syntax/index.ts";
+import { assertNever, type Expr } from "../../syntax/index.ts";
 import { extractFields } from "../../features/index.ts";
 import type { PermalinkField } from "../../features/permalink.ts";
 import {
   evaluateFormula,
+  isError,
+  materialize,
   UnsupportedError,
   type BlankMode,
+  type EvalResult,
   type SfValue,
 } from "../../engine/index.ts";
 import type { SfType } from "../../registry/index.ts";
@@ -16,18 +19,27 @@ import {
   buildFieldValue,
   classifyResult,
   FIELD_TYPES,
+  renderResult,
   type ResultOutcome,
 } from "./fieldValue.ts";
+import { snippetOf } from "./snippet.ts";
 
 /**
  * The simulation's evaluation outcome: a typed discriminant carried alongside
  * the display text so a formula that legitimately evaluates to the text
  * "#Error!" is never confused with a genuine runtime FormulaError (both would
- * otherwise render the identical string).
+ * otherwise render the identical string). Every outcome that actually ran the
+ * evaluator carries the sub-expression trace the Steps section reads from —
+ * including "unsupported", so a formula that hits the simulation boundary
+ * partway through still shows what led up to it.
  */
 type Outcome =
-  | ResultOutcome
-  | { readonly kind: "unsupported"; readonly functionName: string }
+  | (ResultOutcome & { readonly trace: ReadonlyMap<Expr, EvalResult> })
+  | {
+      readonly kind: "unsupported";
+      readonly functionName: string;
+      readonly trace: ReadonlyMap<Expr, EvalResult>;
+    }
   | { readonly kind: "invalid" };
 
 interface FieldInput {
@@ -38,6 +50,9 @@ interface FieldInput {
 
 interface SimulatePanelProps {
   readonly ast: Expr;
+  /** The formula text `ast` was parsed from, for slicing Steps trace snippets
+   * (spans are offsets into this string). */
+  readonly source: string;
   /** True when the source has error-severity syntax diagnostics. Recovery can
    * hand us a complete AST for invalid text (pasted invisible characters,
    * typographic quotes); simulating that AST would silently answer for a
@@ -78,6 +93,7 @@ function seedInputs(
 
 export function SimulatePanel({
   ast,
+  source,
   syntaxErrors,
   blankToggle,
   contextId,
@@ -122,17 +138,23 @@ export function SimulatePanel({
       };
       map.set(f.name, buildFieldValue(input.type, input.value, input.blank));
     }
+    const trace = new Map<Expr, EvalResult>();
     try {
-      return classifyResult(
-        evaluateFormula(ast, { fields: map, blankMode, now }),
-      );
+      const result = evaluateFormula(ast, {
+        fields: map,
+        blankMode,
+        now,
+        trace: (node, r) => trace.set(node, r),
+      });
+      return { ...classifyResult(result), trace };
     } catch (e) {
       // evaluateFormula only throws UnsupportedError; anything else already
-      // degraded to a FormulaError inside it.
+      // degraded to a FormulaError inside it. The trace collected up to the
+      // throw (see EvalEnv.trace) is still valid and worth keeping.
       if (e instanceof UnsupportedError) {
-        return { kind: "unsupported", functionName: e.functionName };
+        return { kind: "unsupported", functionName: e.functionName, trace };
       }
-      return { kind: "error", text: "#Error!" };
+      return { kind: "error", text: "#Error!", trace };
     }
   }, [ast, syntaxErrors, fields, inputs, blankMode, now]);
 
@@ -256,7 +278,160 @@ export function SimulatePanel({
           </span>
         </p>
       ) : null}
+
+      {"trace" in outcome ? (
+        <StepsSection ast={ast} source={source} trace={outcome.trace} />
+      ) : null}
     </Panel>
+  );
+}
+
+/** Rows a Steps trace should render for `node`, at `depth`, appended to `out`. */
+function collectTraceRows(
+  node: Expr,
+  depth: number,
+  trace: ReadonlyMap<Expr, EvalResult>,
+  out: { node: Expr; depth: number }[],
+): void {
+  switch (node.kind) {
+    // Transparent: formatting, not evaluation — recurse without a row of its own.
+    case "Paren":
+      collectTraceRows(node.expr, depth, trace, out);
+      return;
+    // A literal's value is its source text; a row would just repeat it.
+    case "NumberLit":
+    case "StringLit":
+    case "BooleanLit":
+    case "NullLit":
+      return;
+    // An unparseable region is only worth a row if it was actually reached —
+    // otherwise it is redundant with the syntax errors that already blocked
+    // simulation, or with the branch that skipped over it.
+    case "ErrorNode":
+      if (trace.has(node)) {
+        out.push({ node, depth });
+      }
+      return;
+    case "FieldRef":
+      out.push({ node, depth });
+      return;
+    case "UnaryOp":
+      out.push({ node, depth });
+      collectTraceRows(node.operand, depth + 1, trace, out);
+      return;
+    case "BinaryOp":
+      out.push({ node, depth });
+      collectTraceRows(node.left, depth + 1, trace, out);
+      collectTraceRows(node.right, depth + 1, trace, out);
+      return;
+    case "FunctionCall":
+      out.push({ node, depth });
+      for (const arg of node.args) {
+        collectTraceRows(arg, depth + 1, trace, out);
+      }
+      return;
+    default:
+      return assertNever(node);
+  }
+}
+
+/** A traced value at the same display scale as the result readout. */
+function renderTracedValue(result: EvalResult): string {
+  return renderResult(isError(result) ? result : materialize(result));
+}
+
+/**
+ * Row color: muted for a skipped node, danger for #Error!, else normal. A
+ * skipped row dims through color alone — stacking a row-wide `opacity` on
+ * top of an already-muted value would compound past the light palette's
+ * documented 4.5:1 floor (theme.ts), so the snippet and the value always
+ * share this one color, never opacity.
+ */
+function stepColor(result: EvalResult | undefined): string {
+  if (result === undefined) {
+    return palette.textMuted;
+  }
+  return isError(result) ? palette.danger : palette.text;
+}
+
+/**
+ * The formula's evaluation as an expandable tree, echoing the sub-expression
+ * trace hook (EvalEnv.trace): every evaluated function call, operator, and
+ * field reference alongside its value, with short-circuited branches shown as
+ * not evaluated rather than silently missing. Collapsed by default — a
+ * debugger detail, not the headline. Hidden entirely when the tree has
+ * nothing to show (e.g. the formula is a bare literal).
+ */
+function StepsSection({
+  ast,
+  source,
+  trace,
+}: {
+  ast: Expr;
+  source: string;
+  trace: ReadonlyMap<Expr, EvalResult>;
+}) {
+  // Rows mount only once opened: a formula's value can repeat verbatim
+  // inside its own trace (e.g. a formula that's just "Amount + 1"), and a
+  // closed <details> only hides its body visually — its children stay in the
+  // DOM, which would give the result readout's own text a duplicate match.
+  const [open, setOpen] = useState(false);
+  const rows: { node: Expr; depth: number }[] = [];
+  collectTraceRows(ast, 0, trace, rows);
+  if (rows.length === 0) {
+    return null;
+  }
+  return (
+    <details
+      className="steps"
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary className="steps__summary">{t().ui.simulate.stepsLabel}</summary>
+      <div>
+        {open
+          ? rows.map(({ node, depth }) => {
+              const result = trace.get(node);
+              const skipped = result === undefined;
+              return (
+                <div
+                  key={`${node.span.start}:${node.span.end}`}
+                  className="row-hover"
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    justifyContent: "space-between",
+                    gap: "0.8rem",
+                    padding: "0.32rem 1rem",
+                    paddingLeft: `${1 + depth * 0.9}rem`,
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  <code
+                    style={{
+                      overflowWrap: "anywhere",
+                      color: skipped ? palette.textMuted : palette.text,
+                    }}
+                  >
+                    {snippetOf(source, node.span)}
+                  </code>
+                  <span
+                    style={{
+                      flex: "none",
+                      fontFamily: font.mono,
+                      color: stepColor(result),
+                    }}
+                  >
+                    {skipped
+                      ? t().ui.simulate.stepsNotEvaluated
+                      : renderTracedValue(result)}
+                  </span>
+                </div>
+              );
+            })
+          : null}
+      </div>
+    </details>
   );
 }
 

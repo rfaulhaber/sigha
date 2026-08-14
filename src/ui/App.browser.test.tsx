@@ -137,6 +137,118 @@ test("simulates the formula live from field inputs", async () => {
   await expect.element(screen.getByText("150")).toBeInTheDocument();
 });
 
+test("shows a sub-expression trace with the skipped branch marked not evaluated", async () => {
+  const screen = await render(<App />);
+  await expect
+    .poll(() => screen.container.querySelector(".cm-content"))
+    .toBeTruthy();
+
+  await typeFormula(screen.container, "IF(AND(foo, bar), baz + 13, quux + 14)");
+
+  // Fields extracted in source order: foo, bar infer Boolean (AND's
+  // arguments); baz, quux infer Number (arithmetic operands).
+  await expect
+    .poll(
+      () =>
+        screen.container.querySelectorAll('input[placeholder="value"]').length,
+    )
+    .toBe(2);
+  const [bazInput, quuxInput] = Array.from(
+    screen.container.querySelectorAll<HTMLInputElement>(
+      'input[placeholder="value"]',
+    ),
+  );
+  await userEvent.fill(bazInput!, "5");
+  await userEvent.fill(quuxInput!, "100");
+
+  // foo/bar default to FALSE, so AND(foo, bar) short-circuits to FALSE and IF
+  // takes the else branch: quux + 14 = 114.
+  await expect
+    .poll(() => screen.container.querySelector(".readout")?.textContent)
+    .toBe("114");
+
+  const summary = screen.container.querySelector(".steps__summary");
+  expect(summary).toBeTruthy();
+  await userEvent.click(summary!);
+  await expect
+    .poll(() =>
+      screen.container.querySelector("details.steps")?.hasAttribute("open"),
+    )
+    .toBe(true);
+
+  const rowValue = (snippet: string): string | null | undefined =>
+    Array.from(screen.container.querySelectorAll(".steps code"))
+      .find((code) => code.textContent === snippet)
+      ?.parentElement?.querySelector("span")?.textContent;
+
+  // The taken branch is traced with its computed value...
+  expect(rowValue("quux + 14")).toBe("114");
+  // ...and the branch IF skipped over — never evaluated — is marked as such,
+  // for both the sub-expression and the field reference inside it.
+  expect(rowValue("baz + 13")).toBe("not evaluated");
+  expect(rowValue("baz")).toBe("not evaluated");
+});
+
+test("shows a traced intermediate value rounded to the 32-place display scale", async () => {
+  const screen = await render(<App />);
+  await expect
+    .poll(() => screen.container.querySelector(".cm-content"))
+    .toBeTruthy();
+
+  await typeFormula(screen.container, "1 / 3 + 1");
+
+  const summary = screen.container.querySelector(".steps__summary");
+  expect(summary).toBeTruthy();
+  await userEvent.click(summary!);
+  await expect
+    .poll(() =>
+      screen.container.querySelector("details.steps")?.hasAttribute("open"),
+    )
+    .toBe(true);
+
+  const rowValue = (snippet: string): string | null | undefined =>
+    Array.from(screen.container.querySelectorAll(".steps code"))
+      .find((code) => code.textContent === snippet)
+      ?.parentElement?.querySelector("span")?.textContent;
+
+  // decimal.js carries 1 / 3 at 40-significant-figure precision internally
+  // (value.ts); the trace keeps that raw, but the Steps row must render it
+  // materialized to Salesforce's 32-place display scale, same as the final
+  // result — not the longer raw form.
+  await expect.poll(() => rowValue("1 / 3")).toBe(`0.${"3".repeat(32)}`);
+});
+
+test("truncates a long snippet containing an astral character without corrupting it", async () => {
+  const screen = await render(<App />);
+  await expect
+    .poll(() => screen.container.querySelector(".cm-content"))
+    .toBeTruthy();
+
+  // Long enough either side of the emoji (an astral character — a UTF-16
+  // surrogate pair) that the row's snippet, well past snippet.ts's 60-char
+  // budget, gets middle-truncated. snippet.test.ts pins the exact cut-point
+  // math; this just confirms the real editor → trace → render path agrees.
+  const filler = "x".repeat(40);
+  await typeFormula(screen.container, `"${filler}🎉${filler}" & "y"`);
+
+  const summary = screen.container.querySelector(".steps__summary");
+  expect(summary).toBeTruthy();
+  await userEvent.click(summary!);
+  await expect
+    .poll(() =>
+      screen.container.querySelector("details.steps")?.hasAttribute("open"),
+    )
+    .toBe(true);
+
+  const snippets = Array.from(
+    screen.container.querySelectorAll(".steps code"),
+  ).map((code) => code.textContent ?? "");
+  expect(snippets.length).toBeGreaterThan(0);
+  // A lone surrogate is invalid UTF-16 and renders as U+FFFD; none of the
+  // truncated snippets may contain one.
+  expect(snippets.some((s) => s.includes("�"))).toBe(false);
+});
+
 test("surfaces lint findings in the Problems panel", async () => {
   const screen = await render(<App />);
   await expect

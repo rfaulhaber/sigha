@@ -184,6 +184,7 @@ export function App() {
           <Suspense fallback={null}>
             <SimulatePanel
               ast={ast}
+              source={source}
               syntaxErrors={syntaxErrors}
               blankToggle={context?.blankModeToggle ?? false}
               contextId={contextId}

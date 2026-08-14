@@ -247,8 +247,14 @@ keys, fillable globals). Each becomes a form input whose widget matches its infe
 type (text input, decimal input, date picker, checkbox, picklist free-text) with an explicit
 **Blank** toggle per field — null vs empty vs zero is where formulas bite, so blankness is a
 first-class input state. Values and the blank-mode toggle feed the evaluator; results update
-live. The result panel shows the value, its type, and — stretch goal, cheap with a tree
-interpreter — an expandable trace of sub-expression values for the debugger feel.
+live. Below the result, a collapsed-by-default "Steps" section renders the evaluator's
+sub-expression trace as a tree over the AST: every evaluated field reference, operator, and
+function call alongside its value, for the debugger feel. The tree mirrors the evaluator's own
+short-circuiting exactly — a branch AND/OR/IF/CASE or `&&`/`||` never reached (the losing side of
+an `IF`, an `AND` argument past the first `FALSE`, a `CASE` `when`/`then` pair after the match)
+renders as "not evaluated" rather than a guessed or blank value. The trace comes from a single
+hook in the evaluator's recursive walker (`EvalEnv.trace`), so it costs nothing beyond an
+optional callback when unused and needs no separate interpreter.
 
 ### 8.2 Boolean simplifier
 

@@ -4,6 +4,16 @@ import react from "@vitejs/plugin-react";
 // Static, client-only build — deployable to any static host. No server, no backend.
 export default defineConfig({
   plugins: [react()],
+  server: {
+    watch: {
+      // Vite 8's watcher follows symlinked directories. devenv/direnv state
+      // dirs are symlink portals into the nix store (.devenv/profile,
+      // .direnv/flake-inputs/*), and a profile is a symlink forest — walking
+      // it revisits shared closures through every link edge, millions of
+      // paths, until the dev server exhausts the JS heap.
+      ignored: ["**/.devenv/**", "**/.direnv/**"],
+    },
+  },
   build: {
     target: "es2022",
     // The bundle is a first-impression marketing surface; surface size regressions loudly.

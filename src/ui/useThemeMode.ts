@@ -1,4 +1,9 @@
-import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { applyThemeVars, type ThemeMode } from "../theme/theme.ts";
 import {
   nextPreference,

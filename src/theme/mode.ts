@@ -74,12 +74,15 @@ export function nextPreference(current: ThemePreference): ThemePreference {
  * unconditionally keeps the listener lifecycle off the preference state.
  * Returns an unsubscribe.
  */
-export function watchSystemMode(onChange: (mode: ThemeMode) => void): () => void {
+export function watchSystemMode(
+  onChange: (mode: ThemeMode) => void,
+): () => void {
   if (typeof window.matchMedia !== "function") {
     return () => {};
   }
   const query = window.matchMedia(LIGHT_QUERY);
-  const listener = (e: MediaQueryListEvent) => onChange(e.matches ? "light" : "dark");
+  const listener = (e: MediaQueryListEvent) =>
+    onChange(e.matches ? "light" : "dark");
   query.addEventListener("change", listener);
   return () => query.removeEventListener("change", listener);
 }

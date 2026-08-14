@@ -181,7 +181,8 @@ const effects: Record<ThemeMode, Effects> = {
     accentHover: "color-mix(in srgb, var(--sfa-accent) 86%, black)",
     // No outer bloom: on paper the ring alone reads as focus, and the bloom
     // reads as a printing defect.
-    editorGlow: "0 0 0 3px color-mix(in srgb, var(--sfa-accent) 16%, transparent)",
+    editorGlow:
+      "0 0 0 3px color-mix(in srgb, var(--sfa-accent) 16%, transparent)",
     grainOpacity: "0.028",
     // Lower than dark, not higher: the grid has to sit the same *perceptual*
     // distance off the field, and a neutral step that reads as a whisper down

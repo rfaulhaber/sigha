@@ -409,7 +409,7 @@ describe("lexer: confusable characters", () => {
   it("places the closer fix correctly when escapes precede the smart closer", () => {
     // \\n is a two-character escape the scanner steps over; the closer's fix
     // span must land on the closer itself, not drift into the escape.
-    const source = '\u201Ca\\n b\u201D';
+    const source = "\u201Ca\\n b\u201D";
     const tok = only(source);
     expect(tok.kind).toBe("string");
     const { diagnostics } = lex(source);

@@ -81,6 +81,65 @@ describe("engine: 39-sig-fig math, materialized to 32 places (oracle-verified)",
   });
 });
 
+describe("engine: raw values cross function and comparison boundaries (oracle-verified)", () => {
+  it("hands function arguments over unrounded", () => {
+    expect(n("MIN(100, (0.5 / 1.5), 1000) * 3")).toBe("1");
+    expect(n("FLOOR(MIN((1 / 9), 5) * 9)")).toBe("1");
+    expect(n("MOD(1234.5, (10 / 3))")).toBe(
+      "1.16666666666666666666666666666667",
+    );
+    expect(
+      n("MOD(MIN(1234.5, 123456789), (10 / 3)) * ABS(9) + CEILING(0.5)"),
+    ).toBe("11.5");
+  });
+
+  it("compares raw values, not display-rounded ones", () => {
+    expect(b("(1 / 9) * 9 = 1")).toBe(false);
+    expect(b("(1 / 9) * 9 < 1")).toBe(true);
+    expect(b("(1 / 9) * 9 >= 1")).toBe(false);
+    expect(b("1 + 0.000000000000000000000000000000001 > 1")).toBe(true);
+    // Arithmetic itself rounds at the significant-figure budget, so this
+    // subtraction collapses to exactly 1 before the comparison sees it.
+    expect(b("(2 - ((1 / 9) * 9)) > 1")).toBe(false);
+  });
+});
+
+describe("engine: integer-boundary functions round their input (oracle-verified)", () => {
+  it("FLOOR/CEILING/MFLOOR/MCEILING use a 33-significant-digit budget", () => {
+    expect(n("FLOOR(1 - 0.0000000000000000000000000000000001)")).toBe("1");
+    expect(n("FLOOR(1 - 0.000000000000000000000000000000001)")).toBe("0");
+    // Significant digits, not decimal places: the same 33-nines tail rounds
+    // up once an integer digit consumes part of the budget.
+    expect(n("FLOOR(10 - 0.000000000000000000000000000000001)")).toBe("10");
+    expect(n("MFLOOR(1 - 0.0000000000000000000000000000000001)")).toBe("1");
+    expect(n("MFLOOR(1 - 0.000000000000000000000000000000001)")).toBe("0");
+    expect(n("CEILING(1 + 0.000000000000000000000000000000001)")).toBe("1");
+  });
+
+  it("rounds the input HALF_UP on the floor side, HALF_DOWN on the ceiling side", () => {
+    expect(n("FLOOR(1 - 0.0000000000000000000000000000000005)")).toBe("1");
+    expect(n("MFLOOR(1 - 0.0000000000000000000000000000000005)")).toBe("1");
+    expect(n("CEILING(1 + 0.0000000000000000000000000000000005)")).toBe("1");
+    expect(n("MCEILING(1 + 0.0000000000000000000000000000000005)")).toBe("1");
+  });
+
+  it("ROUND/TRUNC pre-round only sub-1 inputs, at 38 decimal places", () => {
+    expect(n("TRUNC((1 / 9) * 9, 0)")).toBe("1");
+    expect(n("TRUNC(1 - 0.00000000000000000000000000000000000001, 0)")).toBe(
+      "0",
+    );
+    expect(n("TRUNC(10 - 0.00000000000000000000000000000000000001, 0)")).toBe(
+      "9",
+    );
+    expect(n("ROUND(0.5 - 0.000000000000000000000000000000000000001, 0)")).toBe(
+      "1",
+    );
+    expect(n("ROUND(0.5 - 0.00000000000000000000000000000000000001, 0)")).toBe(
+      "0",
+    );
+  });
+});
+
 describe("engine: '+' concatenates text (oracle-verified)", () => {
   it("adds numbers but concatenates text operands", () => {
     expect(n("2 + 3")).toBe("5");
@@ -658,6 +717,15 @@ describe("engine: VALUE/ISNUMBER reject non-decimal syntax", () => {
     ]) {
       expect(b(`ISNUMBER(${bad})`)).toBe(false);
     }
+  });
+
+  it('never trims whitespace (oracle-verified; the org\'s VALUE(" ") row agrees)', () => {
+    for (const padded of ['" 1"', '"1 "', '" 1e3"']) {
+      expect(b(`ISNUMBER(${padded})`)).toBe(false);
+      expect(isError(ev(`VALUE(${padded})`))).toBe(true);
+    }
+    expect(b('ISNUMBER("1e3")')).toBe(true);
+    expect(n('VALUE("1e3")')).toBe("1000");
   });
 });
 

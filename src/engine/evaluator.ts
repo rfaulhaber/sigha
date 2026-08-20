@@ -74,11 +74,12 @@ export function evaluateFormula(ast: Expr, env: EvalEnv): EvalResult {
   }
 }
 
-// Salesforce carries 39 significant figures through chained `/` and `*` (see
-// value.ts) and rounds HALF_UP to this many decimal places only when a Number is
-// "materialized": the final result and each value handed to a function or
-// comparison. Never round per-operation — that loses the guard digits and
-// FLOOR((1/9)*9) becomes 0 instead of 1. Oracle-verified.
+// Salesforce computes arithmetic at 39 significant figures (see value.ts) and
+// rounds HALF_UP to this many decimal places only when the formula's final
+// result is materialized. Function arguments and comparisons see the raw
+// value — (1/9)*9 = 1 is false and MIN(100, 0.5/1.5, 1000) * 3 is exactly 1
+// (oracle-verified) — while the integer-boundary functions round their own
+// inputs at a significant-digit budget (builtins.ts).
 const MAX_SCALE = 32;
 
 /**
@@ -651,8 +652,9 @@ function tryEqual(l: SfValue, r: SfValue): boolean | null {
     return null;
   }
   if (isNumericType(l) && isNumericType(r)) {
-    // Compare at the 32-place materialized scale (so (1/9)*9 equals 1).
-    return asDecimal(materialize(l)).equals(asDecimal(materialize(r)));
+    // Raw, unrounded comparison: (1/9)*9 = 1 is false (oracle-verified) —
+    // rounding happens only at the final result, never at a comparison.
+    return asDecimal(l).equals(asDecimal(r));
   }
   if (l.type === "Boolean" && r.type === "Boolean") {
     return l.data === r.data;
@@ -736,8 +738,9 @@ function compare(
   } else if (lt !== null && rt !== null && l.type === r.type) {
     cmp = Math.sign(lt - rt);
   } else {
-    // Order at the 32-place materialized scale, consistent with equality.
-    cmp = toDecimal(materialize(l)).comparedTo(toDecimal(materialize(r)));
+    // Raw, unrounded ordering, consistent with equality: (1/9)*9 < 1 is true
+    // (oracle-verified).
+    cmp = toDecimal(l).comparedTo(toDecimal(r));
   }
   switch (op) {
     case "<":
@@ -806,9 +809,11 @@ function evalCall(node: FunctionCall, env: EvalEnv): EvalResult {
     if (isError(v)) {
       return v;
     }
-    // A Number handed to a function is materialized to 32 places, so e.g.
-    // FLOOR((1/9)*9) sees 1, not 0.999…. Oracle-verified.
-    args.push(materialize(v));
+    // Arguments are handed over raw: the engine does not round at function
+    // boundaries (oracle-verified, FLOOR(MIN((1/9), 5) * 9) = 1 — the
+    // quotient's guard digits survive MIN). The integer-boundary functions
+    // round their own inputs instead (builtins.ts).
+    args.push(v);
   }
 
   // A blank argument makes most functions blank (null propagates) — in both

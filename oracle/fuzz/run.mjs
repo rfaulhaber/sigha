@@ -66,7 +66,11 @@ const server = await createServer({
   root: repoRoot,
   configFile: false,
   appType: "custom",
-  server: { middlewareMode: true },
+  // No watcher: this server only SSR-loads two modules once. With
+  // configFile:false it would not inherit vite.config.ts's .devenv/.direnv
+  // watch ignores, and crawling those nix-store symlink portals exhausts the
+  // JS heap (see the same ignores in vite.config.ts).
+  server: { middlewareMode: true, watch: null },
   logLevel: "warn",
 });
 

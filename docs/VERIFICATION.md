@@ -258,9 +258,10 @@ verdicts.
 
 Confirmed against Salesforce's own engine and encoded:
 
-- ✅ **Arithmetic scale = 32 decimal places, round-half-up per operation.**
-  `1/3` → `0.333…` (32 places), `1000000/3` → `333333.333…` (32 places), exact
-  values keep their natural scale.
+- ✅ **Final results render at 32 decimal places, round-half-up.** `1/3` →
+  `0.333…` (32 places), `1000000/3` → `333333.333…` (32 places), exact values
+  keep their natural scale. Internal arithmetic runs at 39 significant
+  figures — see the numeric model section below.
 - ✅ **`^` rejects non-integer exponents** (`2^0.5` → error; use SQRT for roots).
 - ✅ **`SQRT` is double-precision** (`SQRT(2)` = `1.4142135623730951`).
 - ✅ **`MOD(x, 0)` is a runtime error in the JVM oracle** — but the org pass
@@ -269,6 +270,11 @@ Confirmed against Salesforce's own engine and encoded:
 - ✅ **Percent fields are ÷100 as input and ×100 as a result type** (99% ↔ 0.99).
 - ✅ **`LEFT`/`RIGHT`/`MID` return blank, not empty string, for an empty result.**
 - ✅ **Text `=` / `<>` are case-sensitive** (`"a" = "A"` → false).
+- ✅ **`ISNUMBER`/`VALUE` never trim whitespace.** `ISNUMBER(" 1")`,
+  `ISNUMBER("1 ")` and `ISNUMBER(" 1e3")` are false and `VALUE(" 1")` is a
+  runtime error, while unpadded exponent forms parse (`ISNUMBER("1e3")`,
+  `VALUE("1e3")` = 1000). Agrees with the org's `VALUE(" ")` error row
+  (`semantics:pw7_value_space`). Locked in `evaluator.test.ts`.
 
 ## Corpus-driven semantics
 
@@ -596,14 +602,29 @@ hover, but refuse to simulate per rule 1):
 The field-valued harness (`oracle/`, `MapFormulaContext`) evaluates bare
 intermediates against the real engine; it settled the numeric-scale model:
 
-- ✅ **39-sig-fig internal math, materialized to 32 decimal places.** Salesforce's
-  `/` and `*` compute at 39 significant figures (`MathContext(39, HALF_UP)`) and
-  round HALF_UP to 32 _decimal places_ only at materialization — the final result
-  and each value handed to a function or comparison — **not** after every op.
-  Verified raw: `(1/9)*9 → 1.000…`, `FLOOR((1/9)*9) → 1`, `1/3 → 0.333…(32)`. Our
-  engine mirrors this (`evaluator.ts` `materialize`; `value.ts` runs at
-  precision 40 — the oracle's 39 significant figures plus the carry digit the
-  org-verified TEXT() rendering needs, see the TEXT() entry above).
+- ✅ **39-sig-fig internal math; rounding only at explicit boundaries.**
+  Arithmetic (`+ - * /` and `MOD`) computes at 39 significant figures
+  (`MathContext(39, HALF_UP)` — formula-engine
+  `BigDecimalHelper.MC_PRECISION_INTERNAL`); the final result rounds HALF_UP
+  to 32 decimal places; everything in between is raw. Function arguments are
+  **not** rounded (`FLOOR(MIN((1/9), 5) * 9)` = 1 — the quotient's guard
+  digits survive MIN; `MIN(100, 0.5/1.5, 1000) * 3` = 1 exactly;
+  `MOD(1234.5, 10/3)` = 7/6 at scale 32), and neither are comparisons
+  (`(1/9)*9 = 1` → false, `(1/9)*9 < 1` → true). Two function families round
+  their own input instead, confirmed in formula-engine source and probed on
+  both sides of every budget: FLOOR/CEILING/MFLOOR/MCEILING round to
+  **33 significant digits** — HALF_UP on the floor side, HALF_DOWN on the
+  ceiling side (`FLOOR(1 - 1e-34)` = 1, `FLOOR(1 - 1e-33)` = 0,
+  `FLOOR(10 - 1e-33)` = 10, `FLOOR(1 - 5e-34)` = 1 but
+  `CEILING(1 + 5e-34)` = 1); ROUND/TRUNC pre-round only sub-1 inputs, at 38
+  decimal places HALF_UP — an artifact of the engine's add-1-then-round
+  workaround running under the internal MathContext
+  (`ROUND(0.5 - 1e-39, 0)` = 1, `ROUND(0.5 - 1e-38, 0)` = 0,
+  `TRUNC(10 - 1e-38, 0)` = 9). Locked in `evaluator.test.ts`; our engine
+  mirrors it (`evaluator.ts` materializes the final result, `builtins.ts`
+  holds the per-family input rounding, and `value.ts` runs at precision 40 —
+  the oracle's 39 significant figures plus the carry digit the org-verified
+  TEXT() rendering needs, see the TEXT() entry above).
 - ✅ **`+` concatenates text operands** (`"aaaa" + "bbbb"` → `"aaaabbbb"`). The
   oracle's blank half (blank text operand propagates to null) is contradicted
   by the org pass: the product absorbs the blank (`"aaaa" + blank` → `"aaaa"`,
@@ -710,6 +731,14 @@ called settled:
 - **`email_template` availability** — structurally unverifiable (its
   metadata container never compile-checks merge formulas at deploy); stays
   Tier 2 best-effort unless a new observation channel appears.
+- **Boundary-rounding budgets in the product** — the OSS engine's
+  input-rounding constants (33 significant digits HALF_UP/HALF_DOWN for
+  FLOOR/CEILING/MFLOOR/MCEILING, the sub-1 38-place pre-round in
+  ROUND/TRUNC) and its raw function-argument/comparison semantics are
+  oracle-tier only; no org row exercises a value past digit 32. The org
+  readback channel could settle them with the same discriminating pairs the
+  fuzzer surfaced (`FLOOR(1 - 1e-33)` vs `FLOOR(1 - 1e-34)`,
+  `(1/9)*9 = 1`, `MIN(100, 0.5/1.5, 1000) * 3`).
 - **Constant-fold boundary for computed-from-literal operands** — the WS4
   fuzzer (seed 1) caught the OSS engine constant-folding whole
   constant expressions where our model folds only bare literals

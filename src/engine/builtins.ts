@@ -501,13 +501,13 @@ export const BUILTINS: Record<string, Builtin> = {
     const s = dstr(a!);
     // VALUE("") is blank, but VALUE(" ") is a runtime error — the org splits
     // what the OSS oracle blankets as null (org-verified, pw7_value_empty /
-    // pw7_value_space).
+    // pw7_value_space). Whitespace is never trimmed, so VALUE(" 1") errors
+    // too (oracle-verified, matching ISNUMBER).
     if (s === "") {
       return blank("Number");
     }
-    const t = s.trim();
-    return isParsableNumber(t)
-      ? num(new Decimal(t))
+    return isParsableNumber(s)
+      ? num(new Decimal(s))
       : error("#Error! (VALUE: not a number)");
   },
   // Padded length ≤ 0 is null; a shorter target truncates; the pad string
@@ -518,12 +518,12 @@ export const BUILTINS: Record<string, Builtin> = {
 
   // Math
   ABS: ([a]) => num(dnum(a!).abs()),
-  ROUND: ([a, digits]) => num(roundTo(dnum(a!), toInt(digits!))),
+  ROUND: ([a, digits]) => num(roundTo(roundInput(a!), toInt(digits!))),
   // Salesforce FLOOR/CEILING round relative to zero, not ±∞: FLOOR truncates
   // toward zero (FLOOR(-1.4) = -1), CEILING rounds away from zero
   // (CEILING(-1.4) = -2). Verified against the oracle corpus.
-  FLOOR: ([a]) => num(dnum(a!).toDecimalPlaces(0, Decimal.ROUND_DOWN)),
-  CEILING: ([a]) => num(dnum(a!).toDecimalPlaces(0, Decimal.ROUND_UP)),
+  FLOOR: ([a]) => num(floorInput(a!).toDecimalPlaces(0, Decimal.ROUND_DOWN)),
+  CEILING: ([a]) => num(ceilInput(a!).toDecimalPlaces(0, Decimal.ROUND_UP)),
   MOD: ([a, b]) => {
     const d = dnum(b!);
     // MOD(x, 0) returns x in the product (org-verified, semantics:mod_zero);
@@ -547,11 +547,12 @@ export const BUILTINS: Record<string, Builtin> = {
   // shares `^`'s org-verified rules (integer-only exponent, 1e64 cap, folded
   // vs runtime precision), so it is registry-marked non-simulatable until
   // probed (VERIFICATION.md) — same treatment as LN/EXP.
-  TRUNC: ([a, digits]) => num(truncTo(dnum(a!), digits ? toInt(digits) : 0)),
+  TRUNC: ([a, digits]) =>
+    num(truncTo(roundInput(a!), digits ? toInt(digits) : 0)),
   // MFLOOR/MCEILING are the mathematical floor/ceiling (toward ∓∞), unlike
   // FLOOR/CEILING which round relative to zero. Verified against the corpus.
-  MFLOOR: ([a]) => num(dnum(a!).floor()),
-  MCEILING: ([a]) => num(dnum(a!).ceil()),
+  MFLOOR: ([a]) => num(floorInput(a!).floor()),
+  MCEILING: ([a]) => num(ceilInput(a!).ceil()),
 
   // Date & time
   TODAY: (_args, env) =>
@@ -860,6 +861,44 @@ function textOrBlank(s: string): SfValue {
   return s === "" ? blank("Text") : text(s);
 }
 
+/**
+ * The integer-boundary functions round their INPUT before applying the
+ * boundary op; every other function receives its arguments raw (see evalCall
+ * in evaluator.ts). The engine (formula-engine FunctionFloor/FunctionCeiling
+ * and kin) rounds to 33 significant digits — not decimal places:
+ * FLOOR(1 - 1e-34) = 1 but FLOOR(1 - 1e-33) = 0, and FLOOR(10 - 1e-33) = 10.
+ * The floor side uses HALF_UP, the ceiling side HALF_DOWN (asymmetric in the
+ * engine's source; oracle-verified either way at the half boundary:
+ * FLOOR(1 - 5e-34) = 1 but CEILING(1 + 5e-34) = 1).
+ */
+const BOUNDARY_INPUT_SIG = 33;
+
+/** FLOOR/MFLOOR input, rounded to the 33-sig-digit budget. */
+function floorInput(v: SfValue): Decimal {
+  return dnum(v).toSignificantDigits(BOUNDARY_INPUT_SIG, Decimal.ROUND_HALF_UP);
+}
+
+/** CEILING/MCEILING input — same budget, but HALF_DOWN. */
+function ceilInput(v: SfValue): Decimal {
+  return dnum(v).toSignificantDigits(
+    BOUNDARY_INPUT_SIG,
+    Decimal.ROUND_HALF_DOWN,
+  );
+}
+
+/**
+ * ROUND/TRUNC input. The engine's sub-1 rounding workaround (it adds 1 before
+ * rounding, computed under its 39-sig-digit MathContext) as a side effect
+ * rounds a fraction with 39+ decimal places to 38 places HALF_UP; values >= 1
+ * never get that treatment (oracle-verified: ROUND(0.5 - 1e-39, 0) = 1 and
+ * TRUNC((1/9)*9, 0) = 1, but TRUNC(1 - 1e-38, 0) = 0 and
+ * TRUNC(10 - 1e-38, 0) = 9).
+ */
+function roundInput(v: SfValue): Decimal {
+  const d = dnum(v);
+  return d.abs().lessThan(1) ? d.toDecimalPlaces(38, Decimal.ROUND_HALF_UP) : d;
+}
+
 /** ROUND with round-half-up, supporting negative digits (round left of the point). */
 function roundTo(d: Decimal, digits: number): Decimal {
   if (digits >= 0) {
@@ -895,13 +934,16 @@ function initcapWord(w: string): string {
  * The number grammar VALUE()/ISNUMBER() accept, pinned by corpus rows
  * (testIsNumber / testValue*): optional sign, digits with optional fraction
  * ("1." and ".1" both parse), optional exponent ("1.e+1", ".1e-1").
- * Deliberately NOT decimal.js's constructor, which also accepts "NaN",
- * "Infinity" and 0x/0b/0o forms — those must fail here, not become values.
+ * Whitespace is NOT trimmed: ISNUMBER(" 1"), ISNUMBER("1 ") and
+ * ISNUMBER(" 1e3") are false, and VALUE(" 1") errors (oracle-verified; the
+ * org's VALUE(" ") error row, pw7_value_space, agrees). Deliberately NOT
+ * decimal.js's constructor, which also accepts "NaN", "Infinity" and
+ * 0x/0b/0o forms — those must fail here, not become values.
  */
 const NUMBER_TEXT = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 function isParsableNumber(s: string): boolean {
-  return NUMBER_TEXT.test(s.trim());
+  return NUMBER_TEXT.test(s);
 }
 
 /**

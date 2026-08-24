@@ -180,6 +180,20 @@ describe("triage", () => {
     ).toBe("org-probe-candidate");
   });
 
+  it("sends a TEXT() rendering flipping a comparison to an org probe", () => {
+    // Seed-6 weekly finding: we render the computed TEXT(0.5) as ".5"
+    // (org-verified), the oracle constant-folds to "0.5"; both engines order
+    // the strings identically, so only the rendering flips the boolean.
+    expect(
+      triage({
+        ...base,
+        formula: '(TEXT(MOD(0.5, 2.5)) < TEXT(FIND("0", " ")))',
+        oracle: "false",
+        ours: "true",
+      }).bucket,
+    ).toBe("org-probe-candidate");
+  });
+
   it("sends the `^` fold-boundary refusal to an org probe", () => {
     expect(
       triage({

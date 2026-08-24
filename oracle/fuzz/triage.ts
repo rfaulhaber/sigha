@@ -44,8 +44,8 @@ const oracleErrored = (d: DiffInput): boolean => d.oracle.startsWith("Error:");
 const oursErrored = (d: DiffInput): boolean => d.ours.startsWith("#Error(");
 const oursIsValue = (d: DiffInput): boolean =>
   !oursErrored(d) && d.ours !== "blank";
-const oursIsBoolean = (d: DiffInput): boolean =>
-  d.ours === "true" || d.ours === "false";
+const booleanText = (s: string): boolean => s === "true" || s === "false";
+const oursIsBoolean = (d: DiffInput): boolean => booleanText(d.ours);
 
 /** Plain or exponential decimal; our renderer emits both spellings. */
 const NUMERIC = /^-?(?:\d+)?(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
@@ -219,6 +219,16 @@ const RULES: readonly Rule[] = [
       ) &&
       !oursErrored(d) &&
       !oracleErrored(d),
+  },
+  {
+    bucket: "org-probe-candidate",
+    rationale:
+      "TEXT() output consumed by a comparison: the org-verified rendering divergence (leading zero dropped on computed values vs the oracle's constant-folded conventional rendering) can flip the boolean outcome, which the rendering-kinship checks cannot connect across `true`/`false`. The oracle cannot settle a TEXT-derived comparison — org probe (fold boundary, VERIFICATION.md open questions).",
+    match: (d) =>
+      d.formula.includes("TEXT(") &&
+      /[<>=]/.test(d.formula) &&
+      oursIsBoolean(d) &&
+      booleanText(d.oracle),
   },
   {
     bucket: "org-probe-candidate",

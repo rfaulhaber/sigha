@@ -746,13 +746,16 @@ called settled:
   `(1000 / 1.5 * 7) ^ 2` come back 18-significant-digit folded from the
   oracle while we take the runtime path (43-sig exact ceiling → refusal),
   and `LEN(TEXT(ROUND(0.1, 2)))` reads 3 there (conventional `"0.1"`)
-  against our product-render 2 (`".1"`). Indirect org evidence favors our
+  against our product-render 2 (`".1"`). Seed 6 added the comparison-consumer
+  shape: `TEXT(MOD(0.5, 2.5)) < TEXT(FIND("0", " "))` is true for our `".5"`
+  but false for the oracle's folded `"0.5"` under the string ordering both
+  engines share. Indirect org evidence favors our
   narrow model — org-verified `TEXT(4/3)` renders at the 39-digit runtime
   budget, not 18-sig folded — but the boundary itself is unprobed. Probes
   staged: `semantics:pow_fold_boundary_arith`,
   `semantics:pow_fold_boundary_func`,
   `semantics:text_measure_leading_zero`. Until settled, fuzz triage routes
-  both shapes to org-probe-candidate rather than suspected our-bug.
+  all of these shapes to org-probe-candidate rather than suspected our-bug.
 - **`VALUE("")` — blank or error** — the WS4 fuzzer (seed 1) has
   the oracle throwing `NumberFormatException` ("Character N …" — null
   apparently stringified into `"NaN"` before parsing) for

@@ -17,6 +17,7 @@
 
 import type { CorpusRow } from "../../src/engine/corpus.ts";
 import { runRow } from "../../src/engine/conformance.ts";
+import { Decimal } from "../../src/engine/index.ts";
 import { generateFormulas, type FuzzOptions } from "./generate.ts";
 import {
   buildProbes,
@@ -144,6 +145,7 @@ export function diffProbes(
           blankMode: probe.blankMode,
           oracle: oracle.expected,
           ours,
+          agreesAtOraclePrecision: reproducesAtOraclePrecision(row),
         });
         byBucket[verdict.bucket] += 1;
         discrepancies.push({
@@ -178,6 +180,24 @@ export function diffProbes(
     refusals,
     quarantined,
   };
+}
+
+/**
+ * The OSS engine computes at MathContext(39, HALF_UP) while our evaluator
+ * carries a 40th digit (value.ts). A disagreement that vanishes at the
+ * oracle's own precision is the digit model alone, not the arithmetic —
+ * information triage cannot recover from the two renderings.
+ */
+const ORACLE_PRECISION = 39;
+
+function reproducesAtOraclePrecision(row: CorpusRow): boolean {
+  const ours = Decimal.precision;
+  Decimal.set({ precision: ORACLE_PRECISION });
+  try {
+    return safeRunRow(row).status === "pass";
+  } finally {
+    Decimal.set({ precision: ours });
+  }
 }
 
 /** An evaluator crash is itself a finding, so it is reported, not thrown. */

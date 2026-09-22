@@ -9,6 +9,7 @@ import {
 } from "./probes.ts";
 import { diffProbes } from "./differential.ts";
 import { triage } from "./triage.ts";
+import { Decimal } from "../../src/engine/index.ts";
 
 /**
  * WS4 fuzzer unit suite. The JVM leg is mocked with harness transcripts so this
@@ -194,6 +195,38 @@ describe("triage", () => {
     ).toBe("org-probe-candidate");
   });
 
+  it("sends a 39-vs-40 digit disagreement to an org probe when our evaluator reproduces the oracle at its precision", () => {
+    // Seed-10 weekly finding: MOD scales the divisor's last-digit rounding by
+    // the integer quotient, so the 40th digit our numeric model carries
+    // (value.ts) lands inside the 32-place materialization.
+    const d = {
+      ...base,
+      formula: '(MCEILING(LEN("12")) / MOD(CEILING(1.5), 0.0001 / 3.75))',
+      oracle: "75000.00000000000000000000000000000703",
+      ours: "75000.0000000000000000000000000000007",
+    };
+    expect(triage({ ...d, agreesAtOraclePrecision: true }).bucket).toBe(
+      "org-probe-candidate",
+    );
+    expect(triage(d).bucket).toBe("our-bug");
+  });
+
+  it("sends an OSS null from CONTAINS on an empty subject, absorbed by IF, to an org probe", () => {
+    // Seed-8 weekly finding: the OSS FunctionContains pushes null for an
+    // empty subject, NOT propagates it and IF takes the else branch. The org
+    // evidence for CONTAINS(blank, y) = false is IF-only, so it cannot split
+    // a real false from a null.
+    expect(
+      triage({
+        ...base,
+        formula:
+          'IF(NOT(CONTAINS("", "0")), MOD(LEN("abcabc"), SQRT(0.5)), MCEILING(2))',
+        oracle: "2",
+        ours: "0.3431457505076192",
+      }).bucket,
+    ).toBe("org-probe-candidate");
+  });
+
   it("sends the `^` fold-boundary refusal to an org probe", () => {
     expect(
       triage({
@@ -247,6 +280,38 @@ describe("diffProbes against a mocked oracle", () => {
       oracle: "7",
       verdict: { bucket: "our-bug" },
     });
+  });
+
+  it("re-evaluates a disagreement at the oracle's 39-digit precision before triage", () => {
+    // Seeds 8 and 10: MOD and a large multiplier promote the 40th digit our
+    // model carries into the materialized range; at the OSS engine's own
+    // MathContext our evaluator reproduces both oracle values exactly.
+    const amplified: readonly Probe[] = [
+      {
+        formula: '(MCEILING(LEN("12")) / MOD(CEILING(1.5), 0.0001 / 3.75))',
+        type: "Number",
+        blankMode: "zero",
+      },
+      {
+        formula: "(9 / 7) * CEILING(123456789)",
+        type: "Number",
+        blankMode: "zero",
+      },
+    ];
+    const oracle = parseOracleOutput(
+      [
+        'DOUBLE\t(MCEILING(LEN("12")) / MOD(CEILING(1.5), 0.0001 / 3.75))\tBigDecimal\t75000.00000000000000000000000000000703',
+        "DOUBLE\t(9 / 7) * CEILING(123456789)\tBigDecimal\t158730157.285714285714285714285714285715",
+      ].join("\n"),
+    );
+    const diff = diffProbes(amplified, oracle);
+    expect(diff.summary.differ).toBe(2);
+    expect(diff.discrepancies.map((d) => d.verdict.bucket)).toEqual([
+      "org-probe-candidate",
+      "org-probe-candidate",
+    ]);
+    // The re-evaluation must not leak the oracle's precision into later probes.
+    expect(Decimal.precision).toBe(40);
   });
 
   it("refuses to compare a transcript that does not line up", () => {

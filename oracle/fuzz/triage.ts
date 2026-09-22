@@ -27,6 +27,12 @@ export interface DiffInput {
   readonly oracle: string;
   /** Our rendering, as `conformance.ts` describes a result. */
   readonly ours: string;
+  /**
+   * True when re-running our evaluator at the OSS engine's 39-significant-digit
+   * MathContext (instead of our 40, value.ts) reproduces the oracle exactly —
+   * the disagreement is then the digit model alone, not the arithmetic.
+   */
+  readonly agreesAtOraclePrecision?: boolean;
 }
 
 export interface Verdict {
@@ -233,6 +239,15 @@ const RULES: readonly Rule[] = [
   {
     bucket: "org-probe-candidate",
     rationale:
+      "`CONTAINS` with an empty subject: the OSS `FunctionContains` pushes null for a null/empty target, which `NOT`/`IF` then absorb into the other branch. The org evidence for `CONTAINS(blank, y)` = false is IF-only and cannot split a real false from a null the way the BEGINS probes did (VERIFICATION.md open questions, `contains_blank_subject_not`) — org probe.",
+    match: (d) =>
+      /\bCONTAINS\(\s*""\s*,/.test(d.formula) &&
+      !oursErrored(d) &&
+      !oracleErrored(d),
+  },
+  {
+    bucket: "org-probe-candidate",
+    rationale:
       'Blank vs empty text. The org readback channel cannot tell `""` from null, so this needs a blank-aware org probe, not an oracle verdict.',
     match: (d) =>
       (d.oracle === "null" && d.ours === "") ||
@@ -265,6 +280,12 @@ const RULES: readonly Rule[] = [
     rationale:
       "Negative `num_digits` in ROUND/TRUNC. The oracle is self-inconsistent here (`ROUND(14, -1)` = 10 and `ROUND(150, -2)` = 200, but `ROUND(7, -1)` = 0), so it cannot settle the rule — org probe required.",
     match: (d) => hasNegativeDigitRounding(d.formula) && !oracleErrored(d),
+  },
+  {
+    bucket: "org-probe-candidate",
+    rationale:
+      "Re-evaluated at the OSS engine's 39-significant-digit MathContext, our evaluator reproduces the oracle exactly: the difference is the 40th digit our numeric model carries (org-verified for TEXT() rendering of sub-1 values, VERIFICATION.md), promoted into the 32-place materialization by MOD or a large multiplier. Whether the product's arithmetic carries that digit through such shapes is unprobed — the Oracle-NUMBER parity model predicts it does for some operands and not others (VERIFICATION.md open questions, digit-40 amplification) — org probe.",
+    match: (d) => d.agreesAtOraclePrecision === true,
   },
   {
     bucket: "org-probe-candidate",

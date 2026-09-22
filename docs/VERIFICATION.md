@@ -180,7 +180,12 @@ outrank the JVM oracle; where they disagree below, the org is authoritative.
 - ✅ **`CONTAINS`/`FIND` coerce blank operands to ""** — org and oracle agree
   (`testIfContainsFunc`, `testFindOnText`): `CONTAINS(x, blank)` is true,
   `CONTAINS(blank, y)` is false, `FIND(y, blank)` is 0. Both are blank-aware
-  in the evaluator now.
+  in the evaluator now. 🔬 Caveat on the blank-subject half: that evidence is
+  IF-only (`IF(CONTAINS(blank, y), …)` takes the else branch), which cannot
+  split a real false from a null — the OSS `FunctionContains` pushes null for
+  an empty subject, and the org propagates a null Boolean through `NOT`
+  (closure pass). WS4 seed 8 hit exactly that lens; probes staged under open
+  questions (`contains_blank_subject_not`).
 - ✅ **Locale-aware `UPPER`/`LOWER`** — the second (locale) argument is
   documented ("Locale rules are applied if a locale is provided") and
   org-verified as honored (`upper("idempotent", "tr")` = `"İDEMPOTENT"`,
@@ -767,3 +772,37 @@ called settled:
   `semantics:value_empty_text`, `semantics:value_empty_text_composed`
   (bisectable pair). Fuzz triage routes oracle-error-over-our-blank to
   org-probe-candidate.
+- **Digit-40 arithmetic under amplification** — the WS4 fuzzer (seeds 8
+  and 10) caught MOD and a large multiplier promoting the 40th significant
+  digit our evaluator carries (`value.ts` runs at precision 40 for the
+  org-verified TEXT() budget) into the 32-place materialization, where the
+  OSS engine's flat `MathContext(39)` disagrees:
+  `MCEILING(LEN("12")) / MOD(CEILING(1.5), 0.0001 / 3.75)` is
+  `75000.0000000000000000000000000000007` for us and
+  `75000.00000000000000000000000000000703` for the oracle (MOD scales the
+  divisor's last-digit rounding by the integer quotient, 74999×), and
+  `(9 / 7) * CEILING(123456789)` ends `…7143` for us vs `…715`. Re-running
+  our evaluator at precision 39 reproduces both oracle values exactly, so
+  the arithmetic agrees and only the digit model is in question. Neither
+  side is org-verified past digit 32. The Oracle-NUMBER parity model behind
+  the TEXT() budget (39 digits when the leading digit sits at an even
+  decimal position, 40 when odd) predicts the product sides with **us** on
+  the first (the sub-1 divisor carries 40 digits) and with the **oracle** on
+  the second (9/7 carries 39), so the pair discriminates flat-39, flat-40
+  and parity. Probes staged: `semantics:digit40_mod_amplified`,
+  `semantics:digit40_mul_amplified`. Fuzz triage re-evaluates every
+  disagreement at the oracle's precision and routes a match to
+  org-probe-candidate.
+- **`CONTAINS` with a blank subject: false or null** — the WS4 fuzzer
+  (seed 8) hit `IF(NOT(CONTAINS("", "0")), MOD(LEN("abcabc"), SQRT(0.5)),
+MCEILING(2))`: 0.3431457505076192 for us (CONTAINS false, NOT true), 2
+  for the oracle (the OSS `FunctionContains` pushes null for an empty
+  subject, NOT propagates it, IF takes the else branch). The org-verified
+  "`CONTAINS(blank, y)` is false" rests on IF-only lenses that cannot split
+  false from null, and the org has already shown `NOT()` propagating a null
+  Boolean and `BEGINS(blank, "a")` reading as null. Probes staged with the
+  BEGINS NOT lens: `semantics:contains_blank_subject_not` (field, runtime
+  path) and `semantics:contains_empty_literal_not` (the literal fuzz shape,
+  fold path). If the product answers null, the evaluator's blank-aware
+  CONTAINS subject is wrong and needs the BEGINS per-argument split. Fuzz
+  triage routes the shape to org-probe-candidate.

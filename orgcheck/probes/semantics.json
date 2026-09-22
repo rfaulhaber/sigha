@@ -1997,6 +1997,52 @@
         "null": "blank propagates through CEILING and division — matches our implementation",
         "#Error!": "an error surfaces — either VALUE(\"\") itself errors (see value_empty_text) or a blank divisor is coerced and divides by zero"
       }
+    },
+    {
+      "id": "digit40_mod_amplified",
+      "question": "🔬 digit-40 amplification (WS4 fuzz seed 10): MOD scales the divisor's last-digit rounding by the integer quotient (74999×), promoting the 39-vs-40 significant-digit question into the materialized range. Read the TEXT() twin. With digit40_mul_amplified this discriminates flat-39 (OSS MathContext), flat-40 (our value.ts) and Oracle-NUMBER parity.",
+      "formula": "(MCEILING(LEN(\"12\")) / MOD(CEILING(1.5), 0.0001 / 3.75))",
+      "returns": "Number",
+      "interpret": {
+        "75000.0000000000000000000000000000007031": "the sub-1 divisor carried a 40th digit — flat-40 or parity; matches our implementation",
+        "75000.0000000000000000000000000000070312": "the divisor carried 39 digits like the OSS MathContext — flat-39; our precision-40 arithmetic is wrong (keep the 40th digit for TEXT rendering only)"
+      }
+    },
+    {
+      "id": "digit40_mul_amplified",
+      "question": "🔬 digit-40 amplification (WS4 fuzz seed 8): a 9-digit multiplier shifts the rounding of 9/7's 39th/40th digit into the materialized range. Read the TEXT() twin. Parity predicts the OSS answer here (9/7's leading digit sits at an even position → 39 digits) while flat-40 predicts ours.",
+      "formula": "(9 / 7) * CEILING(123456789)",
+      "returns": "Number",
+      "interpret": {
+        "158730157.285714285714285714285714285715": "9/7 carried 39 digits — flat-39, or parity if digit40_mod_amplified sided with us; our flat precision-40 arithmetic is wrong here",
+        "158730157.285714285714285714285714285714": "9/7 carried 40 digits — flat-40; matches our implementation"
+      }
+    },
+    {
+      "id": "contains_blank_subject_not",
+      "question": "🔬 CONTAINS with a blank subject through the NOT lens (WS4 fuzz seed 8; same lens as begins_blank_subject_not): a real false → NOT → true → NOTTRUE; a null → NOT propagates → ELSEBRANCH. The org-verified CONTAINS(blank, y) = false rests on IF-only lenses that cannot split the two.",
+      "formula": "IF(NOT(CONTAINS(customtext1__c, \"0\")), \"NOTTRUE\", \"ELSEBRANCH\")",
+      "returns": "Text",
+      "fields": {
+        "customtext1__c": {
+          "type": "Text",
+          "value": null
+        }
+      },
+      "interpret": {
+        "NOTTRUE": "CONTAINS(blank, y) is a real FALSE — blank-aware; matches our implementation",
+        "ELSEBRANCH": "CONTAINS(blank, y) is null — propagation like BEGINS(blank, y); our blank-aware subject is wrong, apply the BEGINS per-argument split"
+      }
+    },
+    {
+      "id": "contains_empty_literal_not",
+      "question": "🔬 the literal fuzz shape (WS4 fuzz seed 8): IF(NOT(CONTAINS(\"\", \"0\")), …) — the OSS engine pushes null for an empty subject and lands in the else branch; we take the then branch. Folded-literal twin of contains_blank_subject_not.",
+      "formula": "IF(NOT(CONTAINS(\"\", \"0\")), \"NOTTRUE\", \"ELSEBRANCH\")",
+      "returns": "Text",
+      "interpret": {
+        "NOTTRUE": "CONTAINS(\"\", y) is a real FALSE on the folded path — matches our implementation",
+        "ELSEBRANCH": "CONTAINS(\"\", y) is null on the folded path — matches the OSS engine; our evaluator is wrong for this shape"
+      }
     }
   ]
 }

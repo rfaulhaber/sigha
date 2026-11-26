@@ -33,6 +33,13 @@ export interface DiffInput {
    * the disagreement is then the digit model alone, not the arithmetic.
    */
   readonly agreesAtOraclePrecision?: boolean;
+  /**
+   * True when substituting the OSS engine's 18-significant-digit value for
+   * each negative-exponent `^` (instead of the org-verified scale-42 value)
+   * makes our evaluator reproduce the oracle exactly — the disagreement is
+   * then the known `^` precision divergence, amplified (e.g. by MOD).
+   */
+  readonly agreesWithOraclePower?: boolean;
 }
 
 export interface Verdict {
@@ -204,6 +211,12 @@ const RULES: readonly Rule[] = [
       (agreeToSignificantDigits(d.ours, d.oracle, 15) ||
         (oursErrored(d) && magnitudeAtLeast(d.oracle, 64)) ||
         (oracleErrored(d) && magnitudeAtLeast(d.ours, 64))),
+  },
+  {
+    bucket: "known-divergence",
+    rationale:
+      "With the OSS engine's 18-significant-digit value spliced in for each negative-exponent `^`, our evaluator reproduces the oracle exactly. The only difference is the `^` precision, where the org carries scale 42 (org-verified, VERIFICATION.md `^` entry), amplified past the 15-digit fold signature by the surrounding arithmetic (typically MOD, which multiplies the divisor's last-digit rounding by the integer quotient). Org wins.",
+    match: (d) => d.agreesWithOraclePower === true,
   },
   {
     bucket: "org-probe-candidate",

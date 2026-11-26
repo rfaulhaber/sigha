@@ -439,6 +439,18 @@ formerly-refusing functions, now simulated with golden coverage:
   the whole formula). Simulation refuses in exactly one case — an exact
   form too large to compute and verify (bases within ~1e-4 of 1 raised to
   multi-thousand exponents); everything else is org-verified.
+  **Fuzz triage of the negative-exponent gap**: the OSS engine returns a
+  negative-exponent `^` at 18 significant digits, so the fold-signature
+  check (agreement to ~15 digits) normally files the difference as known.
+  `MOD` defeats that check. It multiplies the divisor's last-digit rounding
+  by the integer quotient, and when `x / d` is an exact integer the rounding
+  direction picks a remainder near 0 or one near `d`. WS4 seed 19:
+  `MOD(2, ROUND(123456789, 3) ^ -1)` gives `8.10000007371000067076101e-9`
+  for us and `1.8790274E-19` for the oracle. The oracle's own
+  `MOD(2, 1/123456789)` returns our value exactly, so its MOD arithmetic
+  agrees with ours. The differential now splices the oracle's 18-digit
+  value in for each negative-exponent `^` and re-runs our evaluator. An
+  exact reproduction routes the row to known-divergence.
 - ✅ **WS4-derived function edges**: `FIND` with an empty search
   term returns **0**, not 1 (`pw7_find_empty_needle`, and `FIND("", "")` =
   0 too). `VALUE("")` is **blank** while `VALUE(" ")` is a runtime

@@ -7,7 +7,7 @@ import {
   renderProbeFile,
   type Probe,
 } from "./probes.ts";
-import { diffProbes } from "./differential.ts";
+import { diffProbes, withOracleNegativePowers } from "./differential.ts";
 import { triage } from "./triage.ts";
 import { Decimal } from "../../src/engine/index.ts";
 
@@ -195,6 +195,23 @@ describe("triage", () => {
     ).toBe("org-probe-candidate");
   });
 
+  it("treats a negative-exponent `^` precision gap amplified by MOD as the known `^` divergence when the oracle's power value reproduces it", () => {
+    // Seed-19 weekly finding: 123456789^-1 at the org's scale 42 rounds up,
+    // so MOD's floor quotient drops by one and the remainder is ~the divisor;
+    // the OSS 18-digit value rounds down and leaves a remainder near zero.
+    const d = {
+      ...base,
+      formula:
+        "MOD(IF(IF(TRUE, TRUE, TRUE), 2, (0.5 - 0)), (ROUND(123456789, 3)) ^ -1)",
+      oracle: "1.8790274E-19",
+      ours: "8.10000007371000067076101e-9",
+    };
+    expect(triage({ ...d, agreesWithOraclePower: true }).bucket).toBe(
+      "known-divergence",
+    );
+    expect(triage(d).bucket).toBe("our-bug");
+  });
+
   it("sends a 39-vs-40 digit disagreement to an org probe when our evaluator reproduces the oracle at its precision", () => {
     // Seed-10 weekly finding: MOD scales the divisor's last-digit rounding by
     // the integer quotient, so the 40th digit our numeric model carries
@@ -312,6 +329,48 @@ describe("diffProbes against a mocked oracle", () => {
     ]);
     // The re-evaluation must not leak the oracle's precision into later probes.
     expect(Decimal.precision).toBe(40);
+  });
+
+  it("re-evaluates a disagreement with the oracle's 18-digit negative-exponent `^` before triage", () => {
+    // Seed 19: MOD amplifies the 18-vs-scale-42 `^` precision gap past the
+    // 15-digit fold signature. With the OSS power value spliced in, our
+    // evaluator reproduces both oracle values exactly.
+    const amplified: readonly Probe[] = [
+      {
+        formula: 'MOD(ABS(100) - LEN("-3"), MOD((3) ^ -2, FLOOR(12.125)))',
+        type: "Number",
+        blankMode: "zero",
+      },
+      {
+        formula:
+          "MOD(IF(IF(TRUE, TRUE, TRUE), 2, (0.5 - 0)), (ROUND(123456789, 3)) ^ -1)",
+        type: "Number",
+        blankMode: "blank",
+      },
+    ];
+    const oracle = parseOracleOutput(
+      [
+        'DOUBLE\tMOD(ABS(100) - LEN("-3"), MOD((3) ^ -2, FLOOR(12.125)))\tBigDecimal\t9.8E-17',
+        "DOUBLE\tMOD(IF(IF(TRUE, TRUE, TRUE), 2, (0.5 - 0)), (ROUND(123456789, 3)) ^ -1)\tBigDecimal\t1.8790274E-19",
+      ].join("\n"),
+    );
+    const diff = diffProbes(amplified, oracle);
+    expect(diff.summary.differ).toBe(2);
+    expect(diff.discrepancies.map((d) => d.verdict.bucket)).toEqual([
+      "known-divergence",
+      "known-divergence",
+    ]);
+  });
+
+  it("splices only outermost negative-exponent `^` nodes", () => {
+    expect(withOracleNegativePowers("MOD(98, 3 ^ -2)", "zero")).toBe(
+      "MOD(98, (0.111111111111111111))",
+    );
+    // A positive exponent is the fold path the 15-digit rule already covers.
+    expect(withOracleNegativePowers("MOD(98, 3 ^ 2)", "zero")).toBeNull();
+    expect(withOracleNegativePowers("(2 ^ -1) ^ -2 + 1", "zero")).toBe(
+      "(4) + 1",
+    );
   });
 
   it("refuses to compare a transcript that does not line up", () => {
